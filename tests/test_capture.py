@@ -12,6 +12,7 @@ class FakeStream:
     def start_stream(self):pass
     def stop_stream(self):pass
     def close(self):pass
+    def get_read_available(self):return 1600
     def read(self,frames,exception_on_overflow=True):
         time.sleep(.001);self.n+=1
         if self.fail and self.n==5:raise OSError('test device unplugged')
@@ -51,5 +52,16 @@ class CaptureTests(unittest.TestCase):
         self.assertTrue((self.root/'audio/mic_0000000.wav').exists())
         meta=read_json(self.root/'audio/mic_0000000.json')
         self.assertEqual(meta['duration'],1.);self.assertEqual(meta['offset'],12)
+    def test_idle_loopback_stop_never_blocks(self):
+        class IdleStream(FakeStream):
+            def get_read_available(self):return 0
+            def read(self,*args,**kwargs):raise AssertionError('idle stream must not be read')
+        class IdleAudio(FakeAudio):
+            def open(self,**kwargs):return IdleStream()
+        with patch('capture.pa.PyAudio',return_value=IdleAudio()):
+            c=Capture(self.root,{});c.start();time.sleep(.02)
+            start=time.monotonic();c.stop()
+        self.assertLess(time.monotonic()-start,1.)
+        self.assertFalse(c.errors)
 
 if __name__=='__main__':unittest.main()

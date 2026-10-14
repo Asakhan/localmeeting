@@ -30,6 +30,7 @@ Windows에서 인터넷 없이 녹음, 한국어/한영 음성 인식, 화자 �
 - 화자: pyannote segmentation 3.0 INT8 ONNX + WeSpeaker 임베딩. CPU 2스레드.
 - 회의록: `Qwen3.5-9B Q4_K_M`, llama.cpp. STT 종료 후에만 시작하고 완료 시 종료.
 - 기본 CPU 추론 4스레드, 낮은 프로세스 우선순위. GPU 여유 부족 시 CPU로 전환. RAM 여유가 부족하면 분석을 중단하고 녹음을 보존합니다.
+- CPU 대체 경로는 느려 실시간 전사가 밀릴 수 있습니다. 녹음은 별도로 계속되고 종료 후 남은 구간을 처리합니다. GPU를 사용하는 기본 경로가 권장됩니다.
 - 모델 로딩 이후에도 자원 사용량은 회의 길이/동시 프로그램에 따라 달라집니다. 수치는 [실측 검증 기록](docs/verification.md)을 참조하세요.
 - 현재 확인된 PC: Ryzen 9 9955HX3D 16코어/32스레드, RAM 32GB, RTX 5070 Ti Laptop VRAM 12GB.
 

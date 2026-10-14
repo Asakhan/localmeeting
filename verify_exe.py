@@ -5,7 +5,7 @@ from core import ROOT,settings,atomic_json,read_json
 
 def main():
     exe=ROOT/'dist/LocalMeeting/LocalMeeting.exe'
-    folder=ROOT/'test-output/exe-meeting';folder.mkdir(parents=True,exist_ok=True)
+    folder=ROOT/'test-output'/f'exe-meeting-{time.time_ns()}';folder.mkdir(parents=True,exist_ok=True)
     audio=folder/'audio';audio.mkdir(exist_ok=True)
     shutil.copy2(ROOT/'test-output/ko.wav',audio/'mic_0000000.wav')
     atomic_json(audio/'mic_0000000.json',dict(source='mic',offset=0,duration=3.5265,file='mic_0000000.wav'))

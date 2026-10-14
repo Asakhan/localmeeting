@@ -45,7 +45,7 @@ class SpeechEngine:
         modelroot=Path(config['model_root'])
         choice='komix' if config['language']=='ko' else 'large-v3'
         self.device='cuda' if config['device']!='cpu' and gpu_free()>4200 else 'cpu'
-        event(folder,'loading',f'음성 모델 준비 중 · {self.device.upper()}')
+        event(folder,'loading',f'음성 모델 준비 중 · {self.device.upper()}'+(' · 실시간 표시가 지연될 수 있습니다.' if self.device=='cpu' else ''))
         self.whisper=WhisperModel(str(modelroot/choice),device=self.device,
             compute_type='int8_float16' if self.device=='cuda' else 'int8',cpu_threads=config['threads'],num_workers=1,local_files_only=True)
         emb=so.SpeakerEmbeddingExtractorConfig(model=str(modelroot/'speaker.onnx'),num_threads=2,provider='cpu')

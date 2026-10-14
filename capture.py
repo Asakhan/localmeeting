@@ -44,16 +44,29 @@ class Capture:
     def _record(self,source,stream,rate,channels):
         sequence=0; frames=0; writer=None; path=None
         try:
-            while not self.stop_event.is_set():
+            last_packet=time.monotonic()
+            while True:
+                stopping=self.stop_event.is_set()
+                available=stream.get_read_available()
+                if available<=0:
+                    if stopping:break
+                    # WASAPI loopback emits no packets when the output endpoint is idle.
+                    # Never block in read(): stop must remain responsive during silence.
+                    if writer and time.monotonic()-last_packet>0.5:
+                        writer.close();writer=None
+                        self._publish(path,source,offset,frames/rate);sequence+=1
+                    self.stop_event.wait(.01);continue
+                take=min(available,rate//10)
                 if writer is None:
                     if shutil.disk_usage(self.folder).free < 512*1024**2:
                         raise RuntimeError('디스크 여유 공간이 512MB 미만입니다. 녹음을 중단합니다.')
                     path=self.folder/'audio'/f'{source}_{sequence:07}.part.wav'
-                    offset=time.monotonic()-self.started
+                    offset=max(0,time.monotonic()-self.started-available/rate)
                     atomic_json(path.with_suffix('.json'),dict(source=source,offset=offset,rate=rate))
                     writer=sf.SoundFile(str(path),mode='w',samplerate=rate,channels=1,subtype='PCM_16')
                     frames=0
-                raw=stream.read(rate//10,exception_on_overflow=True)
+                raw=stream.read(take,exception_on_overflow=True)
+                last_packet=time.monotonic()
                 samples=np.frombuffer(raw,dtype=np.int16).reshape(-1,channels).astype(np.float32).mean(axis=1)/32768
                 writer.write(samples);writer.flush()
                 self.last_received[source]=time.monotonic()
@@ -63,6 +76,7 @@ class Capture:
                     writer.close();writer=None
                     self._publish(path,source,offset,frames/rate)
                     sequence+=1
+                if stopping:break
         except Exception as e:
             self.errors.append(f'{source}: {e}');self.stop_event.set()
         finally:
