@@ -141,3 +141,39 @@ def new_meeting(config):
     atomic_json(folder/'meeting.json',dict(started=now(),ended=None,state='recording',config=config))
     atomic_json(folder/'names.json',{})
     return folder
+
+def export_text(folder):
+    folder=Path(folder);names=read_json(folder/'names.json',{})
+    meta=read_json(folder/'meeting.json',{})
+    lines=[f"회의 시작: {meta.get('started','')}",f"회의 종료: {meta.get('ended','')}",'']
+    for row in transcript(folder):
+        lines.append(f"[{stamp(row['start'])} ~ {stamp(row['end'])}] {names.get(row['speaker'],row['speaker'])}: {display(row['text'],names)}")
+    temp=folder/'전체전사.tmp'
+    with temp.open('w',encoding='utf-8-sig') as f:
+        f.write('\n'.join(lines)+'\n');f.flush();os.fsync(f.fileno())
+    os.replace(temp,folder/'전체전사.txt')
+    return folder/'전체전사.txt'
+
+def finalize_outputs(folder, allow_delete=True):
+    """Delete only this meeting's audio, only after all outputs validate."""
+    import zipfile
+    folder=Path(folder).resolve()
+    doc=export_docx(folder);text=export_text(folder)
+    with zipfile.ZipFile(doc) as z:
+        if z.testzip() is not None or 'word/document.xml' not in z.namelist():raise RuntimeError('Word 파일 검증 실패')
+    if not text.read_text(encoding='utf-8-sig').strip():raise RuntimeError('전체 전사 저장 확인 실패')
+    meta=read_json(folder/'meeting.json',{})
+    capture=read_json(folder/'capture_done.json',{})
+    missing=[p for p in (folder/'audio').glob('*.json') if 'file' in (read_json(p,{}) or {}) and not (folder/'results'/p.name).exists()]
+    can_delete=allow_delete and not missing and not capture.get('errors') and not list((folder/'audio').glob('*.part.wav'))
+    if can_delete:
+        audio=(folder/'audio').resolve()
+        if audio.parent!=folder or audio.is_symlink():raise RuntimeError('오디오 폴더 경로 확인 실패')
+        for p in audio.iterdir():
+            if p.is_file() and not p.is_symlink() and p.suffix.lower() in ('.wav','.json'):
+                p.unlink()
+        meta['audio_deleted']=True
+    else:meta['audio_deleted']=False
+    meta['docx']=doc.name;meta['state']='complete' if can_delete else 'review'
+    atomic_json(folder/'meeting.json',meta)
+    return doc
