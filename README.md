@@ -10,12 +10,32 @@ Windows에서 인터넷 없이 녹음, 한국어/한영 음성 인식, 화자 �
 
 1. **설정**에서 마이크와 회의 언어를 선택합니다. 대면 한국어 회의가 기본값입니다. 온라인 회의는 컴퓨터 음성도 녹음을 켜고, 헤드폰 사용을 권장합니다.
 2. **회의녹음 → 회의 녹음 시작**을 누릅니다. 약 12초 단위의 시간·화자별 발언이 표시됩니다. 첫 모델 준비 중에도 녹음은 디스크에 저장됩니다.
-3. **회의 종료**를 누르면 남은 발언을 전사하고 음성 모델을 종료한 뒤 회의록을 작성합니다.
+3. **회의 종료**를 누르면 남은 발언을 전사하고 음성 모델을 종료한 뒤 **단어 교정 → 문법 검수 → 회의록 작성**을 진행합니다. 녹음 중 표시되는 전사는 교정 전 초안이며, 최종 결과는 화면·전체전사 TXT·Word 및 요약에 반영됩니다.
 4. **회의록 보기**에서 내용을 확인하고 참석자 이름을 입력한 뒤 **이름 일괄 적용**을 누릅니다. Word와 전체 전사 TXT에 함께 반영됩니다.
 
 각 회의 폴더에 `회의록.docx`, `전체전사.txt`, 이름 수정/복구를 위한 JSON 메타데이터가 저장됩니다. Word를 열어 둬 덮어쓸 수 없으면 수정본을 별도 파일로 저장하고 앱의 Word 열기가 최신 수정본을 가리킵니다.
 
 회의록 항목: 회의명, 시작·종료 일시, 참석자, 안건, 주요 논의사항, 제안 사항, 결정 사항, 미결 사항, 실행 과제(담당자·기한·할 일), 후속 일정. 부록으로 전체 발언도 포함합니다. 발언에 없던 결정·기한은 만들지 않도록 지시하며, 확인되지 않은 항목은 표시합니다.
+
+## 한국어 전사 교정
+
+로컬 Qwen 모델이 문맥상 오인식된 단어를 제안하고, 별도 문법 검수에서 조사·어미·어색한 연결을 확인합니다. 한글 자모 유사성 검사에 통과한 작은 변경만 적용하며, 단순히 말투를 문어체로 통일하려는 제안은 제외합니다.
+
+기본 고유명사 `아사검`, 프로그램명 `아사검의 회의록`을 음성 인식과 교정에 항상 참고합니다. 기존 설정에도 자동으로 합쳐지며 사용자가 등록한 용어는 유지됩니다. 다른 고유명사·전문용어는 **설정 → 자주 쓰는 용어**에 추가하세요. 등록된 이름 자체는 보존하면서 주변 문법은 교정할 수 있습니다.
+
+실제 로컬 모델로 확인한 예시:
+
+| 교정 전 | 교정 후 |
+| --- | --- |
+| 화자는 반드시 생명으로만 나와야 되겠죠 | 화자는 반드시 한명으로만 나와야 되겠죠 |
+| 후속위팅은 없습니다. | 후속미팅은 없습니다. |
+| 아사범의 회의록 | 아사검의 회의록 |
+| 아사검의 회의로운 프로그램이 성능이 좋다 | 아사검의 회의록은 프로그램의 성능이 좋다 |
+| 오늘 회의은 여기서 마치겠습니다. | 오늘 회의는 여기서 마치겠습니다. |
+
+위 예시는 문맥이 주어진 테스트 결과이며, 특정 단어를 항상 치환하는 규칙은 아닙니다. `생명은 소중합니다`, `프로그램이 좋다` 같은 정상 문장은 유지하도록 검증했습니다. 후처리는 음성을 다시 듣는 과정이 아니라 텍스트 기반 추정이므로 최종 내용은 확인이 필요합니다.
+
+변경된 행의 최초 원문은 `transcript.jsonl`의 `raw_text`에, 변경 전후와 이유·단계는 `transcript_corrections.json`에 저장합니다. 다시 처리할 때도 최초 원문을 기준으로 교정합니다. 교정이 실패하면 원 전사를 유지하고 정상 완료 및 오디오 삭제를 진행하지 않습니다.
 
 ## 오디오 자동 삭제
 
@@ -28,7 +48,7 @@ Windows에서 인터넷 없이 녹음, 한국어/한영 음성 인식, 화자 �
 - 한국어: `Whisper large-v3` INT8. 기존 한국어 특화 medium 모델의 문장 덧붙임 현상을 줄이기 위해 교체했습니다. 무음·단어 시간 정렬을 검사하며 신뢰도가 낮은 단어는 `[청취 불명확]`으로 표시합니다.
 - 한영 혼용: `Whisper large-v3`, CTranslate2 INT8/FP16 추론. 번역하지 않고 발언 언어대로 기록.
 - 화자: pyannote segmentation 3.0 INT8 ONNX + WeSpeaker 임베딩. CPU 2스레드.
-- 회의록: `Qwen3.5-9B Q4_K_M`, llama.cpp. STT 종료 후에만 시작하고 완료 시 종료.
+- 단어 교정·문법 검수·회의록: `Qwen3.5-9B Q4_K_M`, llama.cpp. STT 종료 후 같은 모델을 순차적으로 사용하고 완료 시 종료.
 - 기본 CPU 추론 4스레드, 낮은 프로세스 우선순위. GPU 여유 부족 시 CPU로 전환. RAM 여유가 부족하면 분석을 중단하고 녹음을 보존합니다.
 - CPU 대체 경로는 느려 실시간 전사가 밀릴 수 있습니다. 녹음은 별도로 계속되고 종료 후 남은 구간을 처리합니다. GPU를 사용하는 기본 경로가 권장됩니다.
 - 모델 로딩 이후에도 자원 사용량은 회의 길이/동시 프로그램에 따라 달라집니다. 수치는 [실측 검증 기록](docs/verification.md)을 참조하세요.
@@ -48,10 +68,9 @@ python -m venv .venv
 .\.venv\Scripts\python.exe download_models.py
 ```
 
-한국어 가중치 변환에는 **별도 개발 환경의 PyTorch/transformers**가 필요합니다. 이 PC에서는 기존 ComfyUI Python을 재사용합니다. 실행 EXE에는 PyTorch를 포함하지 않습니다.
+현재 사용하는 large-v3는 변환된 모델을 다운로드하므로 별도 가중치 변환이 필요하지 않습니다. `convert_model.py`는 이전 komix 모델의 재현용이며 현재 실행·빌드에는 사용하지 않습니다. 다운로드 스크립트에는 이전 komix 원본 다운로드도 남아 있습니다. 실행 EXE에는 PyTorch를 포함하지 않습니다.
 
 ```powershell
-& 'C:\AI\ComfyUI_windows_portable\python_embeded\python.exe' .\convert_model.py
 .\.venv\Scripts\python.exe app.py
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe build.py
@@ -65,13 +84,16 @@ python -m venv .venv
 .\.venv\Scripts\python.exe verify_stt.py
 .\.venv\Scripts\python.exe verify_performance.py
 .\.venv\Scripts\python.exe verify_mixed.py
+.\.venv\Scripts\python.exe verify_correction.py
 .\.venv\Scripts\python.exe verify_summary.py
 .\.venv\Scripts\python.exe verify_gui.py
 .\.venv\Scripts\python.exe verify_exe.py
 ```
 
-`verify_stt.py`만 공개 테스트 음성을 다운로드합니다. 나머지 검증은 내려받은 파일을 재사용합니다. 테스트 산출물은 `test-output`에만 저장합니다. 실제 회의 폴더를 테스트에 사용하지 않습니다.
+음성 검사 중 `verify_stt.py`만 공개 테스트 음성을 다운로드하며 다른 음성 검사는 내려받은 파일을 재사용합니다. `verify_correction.py`는 텍스트 예시로 실제 로컬 모델의 단어·문법 교정을 검사합니다. 테스트 산출물은 `test-output`에만 저장합니다. 실제 회의 폴더를 테스트에 사용하지 않습니다.
 
-소스 구성: `capture.py`(녹음), `engine.py`(전사·화자), `summarize.py`(로컬 LLM), `core.py`(저장·DOCX/TXT), `gui.py`(화면), `app.py`(진입점), `winjob.py`(자식 프로세스 정리).
+최근 검증: 단위 테스트 **38개 통과**, 실제 로컬 모델 교정 검사 통과, Windows EXE의 전사→교정→회의록·Word/TXT 저장 통합 검사 통과. 상세 변경 근거와 검증 범위는 [전사 수정 기록](docs/transcription-fix.md)을 참고하세요.
+
+소스 구성: `capture.py`(녹음), `engine.py`(전사·화자), `speech_quality.py`(전사 품질 검사), `transcript_correction.py`(교정 검증·원문 및 이력 저장), `summarize.py`(로컬 LLM·처리 순서), `core.py`(기본 용어·저장·DOCX/TXT), `gui.py`(화면), `app.py`(진입점), `winjob.py`(자식 프로세스 정리).
 
 모델, 가상환경, EXE, 녹음, 회의록, 테스트 산출물은 Git에 올리지 않습니다. [설계·선정 근거](docs/architecture.md), [외부 구성 요소](THIRD_PARTY.md).

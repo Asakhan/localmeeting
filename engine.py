@@ -1,7 +1,7 @@
 """Offline transcription worker. Only bounded 12-second chunks enter RAM."""
 from pathlib import Path
 import os, sys, time, subprocess, gc, json, traceback
-from core import atomic_json, read_json, append_jsonl, ROOT
+from core import atomic_json, read_json, append_jsonl, ROOT, recognition_glossary
 from speech_quality import word_rejection, speaker_for_word
 
 ASR_REVISION='large-v3-int8-evidence-v2'
@@ -105,7 +105,7 @@ class SpeechEngine:
             condition_on_previous_text=False,word_timestamps=True,vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=350,speech_pad_ms=180),
             # Vocabulary hints are hints, not an initial sentence for the decoder to continue.
-            initial_prompt=None,hotwords=self.config.get('glossary','') or None,
+            initial_prompt=None,hotwords=recognition_glossary(self.config.get('glossary','')),
             hallucination_silence_threshold=.5,no_speech_threshold=.5,log_prob_threshold=-.8,
             compression_ratio_threshold=2.2,without_timestamps=False)
         segments=list(segments)

@@ -6,6 +6,12 @@ import json, os, re, sys, uuid
 ROOT = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
 APP_NAME='아사검의 회의록'
 APP_ENGLISH="Khan's Minutes"
+BUILTIN_TERMS=('아사검', '아사검의 회의록')
+
+def recognition_glossary(value=''):
+    """User vocabulary plus persistent application-specific proper nouns."""
+    terms=[x.strip() for x in re.split(r'[,;\n]+',value or '') if x.strip()]
+    return ', '.join(dict.fromkeys([*BUILTIN_TERMS,*terms]))
 # Preserve this internal path so upgrading does not lose existing preferences/locks.
 DATA = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'LocalMinutes'
 DEFAULT_FOLDER = Path.home() / 'Documents' / '회의록'
@@ -37,6 +43,7 @@ def settings():
                     microphone=-1, threads=4, speaker_threshold=0.65, glossary='',
                     device='auto', model_root=str(ROOT / 'models'))
     defaults.update(read_json(DATA / 'settings.json', {}) or {})
+    defaults['glossary']=recognition_glossary(defaults.get('glossary',''))
     return defaults
 
 def stamp(seconds):

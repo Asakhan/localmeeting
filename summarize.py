@@ -76,6 +76,21 @@ class LocalLLM:
                 if attempt:raise
         raise RuntimeError('회의록 검증 실패')
 
+    def correct(self,text,grammar=False):
+        from transcript_correction import SYSTEM, GRAMMAR_SYSTEM
+        CORRECTION_SYSTEM=GRAMMAR_SYSTEM if grammar else SYSTEM
+        if self.tokens(CORRECTION_SYSTEM+text)>10500:raise RuntimeError('전사 교정 입력 길이 초과')
+        result=self.request('/v1/chat/completions',dict(model='local-minutes',messages=[
+            dict(role='system',content=CORRECTION_SYSTEM),dict(role='user',content=text)],
+            temperature=0,max_tokens=3000,response_format={'type':'json_object'},
+            chat_template_kwargs={'enable_thinking':False}),timeout=900)
+        choice=result['choices'][0]
+        if choice.get('finish_reason')=='length':raise RuntimeError('전사 교정 응답 길이 초과')
+        return json.loads(choice['message']['content'])['edits']
+
+    def correct_grammar(self,text):
+        return self.correct(text,grammar=True)
+
 def pack_texts(texts,max_chars=11000):
     batches=[];current=''
     for text in texts:
@@ -104,6 +119,11 @@ def run_summary(folder):
         context=f"회의 시작: {meta['started']}\n회의 종료: {meta.get('ended','')}\n"
         event(folder,'summarizing','로컬 회의록 모델 준비 중')
         with LocalLLM(folder,config) as llm:
+            from transcript_correction import correct_transcript
+            event(folder,'correcting','한국어 문맥·발음 유사성으로 전사 교정 중')
+            rows=correct_transcript(folder,rows,llm,config.get('glossary',''))
+            export_text(folder)
+            texts=[f"[{stamp(r['start'])}] {r['speaker']}: {r['text']}" for r in rows]
             batches=pack_texts(texts)
             level=0
             while True:
