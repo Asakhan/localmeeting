@@ -63,5 +63,12 @@ class CaptureTests(unittest.TestCase):
             start=time.monotonic();c.stop()
         self.assertLess(time.monotonic()-start,1.)
         self.assertFalse(c.errors)
+    def test_stop_drains_the_buffered_tail(self):
+        class TailStream(FakeStream):
+            def get_read_available(self):return 3200
+        c=Capture(self.root,{});c.started=time.monotonic();c.stop_event.set()
+        c._record('mic',TailStream(),16000,2)
+        p=next((self.root/'audio').glob('*.wav'))
+        self.assertEqual(sf.info(p).frames,3200)
 
 if __name__=='__main__':unittest.main()

@@ -49,14 +49,18 @@ class Capture:
                 stopping=self.stop_event.is_set()
                 available=stream.get_read_available()
                 if available<=0:
+                    self.levels[source]=0.
                     if stopping:break
+                    if source=='mic' and time.monotonic()-last_packet>5:
+                        raise RuntimeError('마이크에서 5초 동안 데이터가 도착하지 않았습니다. 장치 연결을 확인하세요.')
                     # WASAPI loopback emits no packets when the output endpoint is idle.
                     # Never block in read(): stop must remain responsive during silence.
                     if writer and time.monotonic()-last_packet>0.5:
                         writer.close();writer=None
                         self._publish(path,source,offset,frames/rate);sequence+=1
                     self.stop_event.wait(.01);continue
-                take=min(available,rate//10)
+                # Drain the already-buffered tail once when stopping, then exit.
+                take=available if stopping else min(available,rate//10)
                 if writer is None:
                     if shutil.disk_usage(self.folder).free < 512*1024**2:
                         raise RuntimeError('디스크 여유 공간이 512MB 미만입니다. 녹음을 중단합니다.')
