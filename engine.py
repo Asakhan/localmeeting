@@ -2,6 +2,9 @@
 from pathlib import Path
 import os, sys, time, subprocess, gc, json, traceback
 from core import atomic_json, read_json, append_jsonl, ROOT
+from speech_quality import word_rejection, speaker_for_word
+
+ASR_REVISION='large-v3-int8-evidence-v2'
 
 _DLL_HANDLES=[]
 def credible_segment(segment):
@@ -43,7 +46,9 @@ class SpeechEngine:
         from faster_whisper import WhisperModel
         self.np=np;self.folder=Path(folder);self.config=config
         modelroot=Path(config['model_root'])
-        choice='komix' if config['language']=='ko' else 'large-v3'
+        # The fine-tuned medium model repeatedly appended invented dialogue.
+        # Both language modes now use the verified large-v3 weights, one resident model.
+        choice='large-v3'
         self.device='cuda' if config['device']!='cpu' and gpu_free()>4200 else 'cpu'
         event(folder,'loading',f'음성 모델 준비 중 · {self.device.upper()}'+(' · 실시간 표시가 지연될 수 있습니다.' if self.device=='cpu' else ''))
         self.whisper=WhisperModel(str(modelroot/choice),device=self.device,
@@ -55,6 +60,7 @@ class SpeechEngine:
              clustering=so.FastClusteringConfig(num_clusters=-1,threshold=0.5),min_duration_on=0.3,min_duration_off=0.25)
         self.diarizer=so.OfflineSpeakerDiarization(cfg)
         self.centroids=[]
+        self.last_quality={}
 
     def embedding(self,samples):
         if len(samples)<8000:return None
@@ -86,12 +92,22 @@ class SpeechEngine:
         if audio.ndim>1:audio=audio.mean(axis=1)
         if sr!=16000:
             g=gcd(sr,16000);audio=resample_poly(audio,16000//g,sr//g).astype(np.float32)
+        self.last_quality=dict(revision=ASR_REVISION,rejected=[],uncertain_words=0)
         if len(audio)<1600:return []
+        from faster_whisper.vad import get_speech_timestamps, VadOptions
+        vad=get_speech_timestamps(audio,VadOptions(threshold=.55,min_speech_duration_ms=160,
+             min_silence_duration_ms=350,speech_pad_ms=80))
+        regions=[(x['start']/16000,x['end']/16000) for x in vad]
+        self.last_quality['speech_regions']=regions
+        if not regions:return []
         segments,info=self.whisper.transcribe(audio,language='ko' if self.config['language']=='ko' else None,
             multilingual=self.config['language']!='ko',task='transcribe',beam_size=5,temperature=0,
             condition_on_previous_text=False,word_timestamps=True,vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=350,speech_pad_ms=180),
-            initial_prompt=self.config.get('glossary','') or None,hallucination_silence_threshold=1.)
+            # Vocabulary hints are hints, not an initial sentence for the decoder to continue.
+            initial_prompt=None,hotwords=self.config.get('glossary','') or None,
+            hallucination_silence_threshold=.5,no_speech_threshold=.5,log_prob_threshold=-.8,
+            compression_ratio_threshold=2.2,without_timestamps=False)
         segments=list(segments)
         if not segments:return []
         turns=self.diarizer.process(audio).sort_by_start_time()
@@ -103,23 +119,30 @@ class SpeechEngine:
             mapping[speaker_id]=self.speaker(self.embedding(voice),meta['source'])
         rows=[]
         for segment in segments:
-            if not credible_segment(segment):continue
-            if segment.no_speech_prob>0.85 and segment.avg_logprob < -0.8:continue
+            if not credible_segment(segment):
+                self.last_quality['rejected'].append(dict(reason='implausible_segment',start=segment.start,end=segment.end))
+                continue
+            if segment.no_speech_prob>.6 and segment.avg_logprob < -.8:
+                self.last_quality['rejected'].append(dict(reason='no_speech',start=segment.start,end=segment.end))
+                continue
             words=segment.words or []
             if not words:
-                words=[type('Word',(),dict(start=segment.start,end=segment.end,word=segment.text))()]
+                # Do not publish guessed text without word alignment evidence.
+                self.last_quality['rejected'].append(dict(reason='missing_alignment',start=segment.start,end=segment.end))
+                continue
             for w in words:
-                overlaps=[max(0,min(w.end,t.end)-max(w.start,t.start)) for t in turns]
-                if overlaps and max(overlaps)>0:
-                    ix=int(np.argmax(overlaps));speaker=mapping[turns[ix].speaker]
-                    # Multiple active voices are explicitly marked, not confidently assigned.
-                    ambiguous=sum(x>max(0.04,(w.end-w.start)*0.4) for x in overlaps)>1
-                    if ambiguous:speaker='겹침 발화'
-                else:speaker='화자 미확인'
+                reason=word_rejection(w,regions,len(audio)/16000)
+                if reason:
+                    self.last_quality['rejected'].append(dict(reason=reason,start=float(w.start),end=float(w.end)))
+                    if reason!='low_confidence':continue
+                    # Do not publish a guessed proper name as a confident utterance.
+                    self.last_quality['uncertain_words']+=1
+                speaker=speaker_for_word(w,turns,mapping)
+                text=' [청취 불명확]' if reason else w.word
                 start=meta['offset']+w.start;end=meta['offset']+w.end
                 if rows and rows[-1]['speaker']==speaker and start-rows[-1]['end']<1.2:
-                    rows[-1]['text']+=w.word;rows[-1]['end']=end
-                else:rows.append(dict(start=start,end=end,speaker=speaker,text=w.word,source=meta['source']))
+                    rows[-1]['text']+=text;rows[-1]['end']=end
+                else:rows.append(dict(start=start,end=end,speaker=speaker,text=text,source=meta['source']))
         for row in rows:row['text']=row['text'].strip()
         return [r for r in rows if r['text']]
 
@@ -168,7 +191,7 @@ def run_transcription(folder):
                 started=time.perf_counter()
                 rows=engine.process(folder/'audio'/j['file'],j)
                 current=folder/'results'/(p.stem+'.json')
-                atomic_json(current,dict(rows=rows,centroids=engine.centroids,order=time.time(),seconds=time.perf_counter()-started,duration=j['duration']))
+                atomic_json(current,dict(rows=rows,centroids=engine.centroids,order=time.time(),seconds=time.perf_counter()-started,duration=j['duration'],quality=engine.last_quality))
                 if previous and previous!=current:
                     old=read_json(previous,{})
                     if 'centroids' in old:

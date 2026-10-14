@@ -1,10 +1,10 @@
-# LocalMeeting · 로컬 회의록
+# 아사검의 회의록 · Khan's Minutes
 
 Windows에서 인터넷 없이 녹음, 한국어/한영 음성 인식, 화자 분리, 회의록 작성 및 Word 저장을 수행하는 데스크톱 프로그램입니다. 메뉴는 **회의녹음 / 회의록 보기 / 설정** 세 가지입니다.
 
 ## 실행
 
-`dist\LocalMeeting\LocalMeeting.exe`를 실행합니다. EXE가 들어 있는 폴더 전체가 실행 패키지입니다. Python 설치는 필요하지 않습니다. 모델과 DLL이 함께 있어야 하므로 EXE 파일 하나만 다른 곳으로 옮기지 마세요.
+`dist\LocalMeeting\KhansMinutes.exe`를 실행합니다. EXE가 들어 있는 폴더 전체가 실행 패키지입니다. Python 설치는 필요하지 않습니다. 모델과 DLL이 함께 있어야 하므로 EXE 파일 하나만 다른 곳으로 옮기지 마세요.
 
 기본 저장 폴더: `C:\Users\문근영\Documents\회의록` (다른 사용자 계정에서는 해당 계정의 `Documents\회의록`).
 
@@ -25,7 +25,7 @@ Windows에서 인터넷 없이 녹음, 한국어/한영 음성 인식, 화자 �
 
 ## 모델·자원 사용
 
-- 한국어: 한국어 대화/회의 데이터로 학습된 `seastar105/whisper-medium-komixv2`를 CTranslate2 INT8/FP16으로 변환. 가중치 약 734 MiB.
+- 한국어: `Whisper large-v3` INT8. 기존 한국어 특화 medium 모델의 문장 덧붙임 현상을 줄이기 위해 교체했습니다. 무음·단어 시간 정렬을 검사하며 신뢰도가 낮은 단어는 `[청취 불명확]`으로 표시합니다.
 - 한영 혼용: `Whisper large-v3`, CTranslate2 INT8/FP16 추론. 번역하지 않고 발언 언어대로 기록.
 - 화자: pyannote segmentation 3.0 INT8 ONNX + WeSpeaker 임베딩. CPU 2스레드.
 - 회의록: `Qwen3.5-9B Q4_K_M`, llama.cpp. STT 종료 후에만 시작하고 완료 시 종료.

@@ -17,10 +17,10 @@ if __name__=='__main__':
     try:sys.exit(main())
     except Exception:
         import traceback
-        from core import DATA
+        from core import DATA,APP_NAME
         DATA.mkdir(parents=True,exist_ok=True)
         (DATA/'crash.log').write_text(traceback.format_exc(),encoding='utf-8')
         if not any(x in sys.argv for x in ['--transcribe','--summarize']):
             import ctypes
-            ctypes.windll.user32.MessageBoxW(0,f'실행 오류가 발생했습니다.\n{DATA / "crash.log"}', '로컬 회의록',0x10)
+            ctypes.windll.user32.MessageBoxW(0,f'실행 오류가 발생했습니다.\n{DATA / "crash.log"}', APP_NAME,0x10)
         raise

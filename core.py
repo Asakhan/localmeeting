@@ -4,6 +4,9 @@ from datetime import datetime
 import json, os, re, sys, uuid
 
 ROOT = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
+APP_NAME='아사검의 회의록'
+APP_ENGLISH="Khan's Minutes"
+# Preserve this internal path so upgrading does not lose existing preferences/locks.
 DATA = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'LocalMinutes'
 DEFAULT_FOLDER = Path.home() / 'Documents' / '회의록'
 SECTIONS = [('agenda', '안건 (Agenda)'), ('discussion', '주요 논의사항'),
@@ -109,7 +112,7 @@ def export_docx(folder):
         doc.styles[style].font.color.rgb=RGBColor.from_string('163B36')
         doc.styles[style]._element.get_or_add_rPr().rFonts.set(qn('w:eastAsia'), '맑은 고딕')
     doc.add_heading(minutes.get('title','회의 기록'), 0)
-    doc.add_paragraph('LOCAL MINUTES  ·  로컬 AI 회의록', style='Subtitle')
+    doc.add_paragraph(f'{APP_ENGLISH}  ·  {APP_NAME}', style='Subtitle')
     table=doc.add_table(rows=0,cols=2); table.style='Light Shading Accent 1'
     for label,value in [('회의명', minutes.get('title','회의 기록')), ('일시', f"{meta.get('started','')} ~ {meta.get('ended','진행 중')}"),
                         ('참석자', f"음성으로 추정한 {len(speakers)}명 · "+', '.join(names.get(s,s) for s in speakers))]:

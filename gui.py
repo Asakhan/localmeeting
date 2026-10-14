@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QHBoxLayout,QVBo
     QPushButton,QStackedWidget,QFrame,QTextBrowser,QListWidget,QListWidgetItem,QLineEdit,
     QComboBox,QCheckBox,QSpinBox,QDoubleSpinBox,QFormLayout,QFileDialog,QMessageBox,
     QTableWidget,QTableWidgetItem,QHeaderView,QProgressBar,QSplitter,QScrollArea)
-from core import (ROOT, DATA, settings, atomic_json, read_json, new_meeting, now, stamp,
+from core import (ROOT, DATA, APP_NAME, APP_ENGLISH, settings, atomic_json, read_json, new_meeting, now, stamp,
                   transcript, display, SECTIONS, export_docx, export_text)
 
 STYLE='''
@@ -47,13 +47,14 @@ def button(text,slot,name=None):
 
 class Window(QMainWindow):
     def __init__(self):
-        super().__init__();self.setWindowTitle('로컬 회의록 · Local Minutes');self.resize(1180,800);self.setMinimumSize(960,660)
+        super().__init__();self.setWindowTitle(f'{APP_NAME} · {APP_ENGLISH}');self.resize(1180,800);self.setMinimumSize(960,660)
         self.config=settings();self.active=None;self.capture=None;self.worker=None;self.stage=None
         self.stop_thread=None;self.stop_error=None;self.selected=None;self.names_loading=False;self.last_live=None
         self.jobs=[];self.started_monotonic=0.;self.last_status='';self.read_mtime=None
         root=QWidget();self.setCentralWidget(root);layout=QHBoxLayout(root);layout.setContentsMargins(0,0,0,0);layout.setSpacing(0)
         sidebar=QFrame();sidebar.setObjectName('sidebar');sidebar.setFixedWidth(206);nav=QVBoxLayout(sidebar);nav.setContentsMargins(18,32,18,20)
-        brand=label('LOCAL\nMINUTES');brand.setStyleSheet('font-size:25px;font-weight:bold;letter-spacing:2px;');nav.addWidget(brand)
+        brand=label("KHAN'S\nMINUTES");brand.setStyleSheet('font-size:25px;font-weight:bold;letter-spacing:2px;');nav.addWidget(brand)
+        nav.addWidget(label(APP_NAME))
         nav.addWidget(label('대화는 편하게,\n기록은 이 PC 안에서.'));nav.addSpacing(32)
         self.nav=[];self.pages=QStackedWidget()
         for i,text in enumerate(['●  회의녹음','▤  회의록 보기','⚙  설정']):
@@ -110,7 +111,7 @@ class Window(QMainWindow):
         form_widget=QWidget();form=QFormLayout(form_widget);form.setSpacing(16);form.setContentsMargins(0,4,12,4)
         scroll.setWidget(form_widget)
         row=QHBoxLayout();self.folder_edit=QLineEdit(self.config['folder']);row.addWidget(self.folder_edit,1);row.addWidget(button('찾아보기',self.choose_folder));form.addRow('회의록 저장 폴더',row)
-        self.language=QComboBox();self.language.addItem('한국어 전용 · 한국어 특화 Whisper', 'ko');self.language.addItem('한국어 + English · Whisper large-v3','mixed');self.language.setCurrentIndex(0 if self.config['language']=='ko' else 1);form.addRow('회의 언어',self.language)
+        self.language=QComboBox();self.language.addItem('한국어 전용 · Whisper large-v3 INT8', 'ko');self.language.addItem('한국어 + English · Whisper large-v3 INT8','mixed');self.language.setCurrentIndex(0 if self.config['language']=='ko' else 1);form.addRow('회의 언어',self.language)
         self.mic=QComboBox();self.mic.addItem('Windows 기본 마이크',-1)
         try:
             from capture import devices
@@ -139,7 +140,7 @@ class Window(QMainWindow):
             self.model_status.setText('오프라인 모델 준비 완료 · 녹음 중에는 회의록 모델을 실행하지 않습니다.' if not missing else '누락된 모델: '+', '.join(missing))
 
     def missing_models(self,config):
-        root=Path(config['model_root']);names=['komix/model.bin','komix/tokenizer.json','large-v3/model.bin','speaker.onnx','segmentation.onnx','llm/Qwen3.5-9B-Q4_K_M.gguf']
+        root=Path(config['model_root']);names=['large-v3/model.bin','large-v3/tokenizer.json','speaker.onnx','segmentation.onnx','llm/Qwen3.5-9B-Q4_K_M.gguf']
         return [name for name in names if not (root/name).exists()]
 
     def choose_folder(self):
@@ -346,11 +347,11 @@ class Window(QMainWindow):
         event.accept()
 
 def run_gui():
-    app=QApplication(sys.argv);app.setApplicationName('LocalMinutes');app.setFont(QFont('Malgun Gothic',10));app.setStyleSheet(STYLE)
+    app=QApplication(sys.argv);app.setApplicationName(APP_ENGLISH);app.setApplicationDisplayName(APP_NAME);app.setFont(QFont('Malgun Gothic',10));app.setStyleSheet(STYLE)
     DATA.mkdir(parents=True,exist_ok=True)
     lock=QLockFile(str(DATA/'app.lock'));lock.setStaleLockTime(0)
     if not lock.tryLock(100):
-        QMessageBox.information(None,'로컬 회의록','프로그램이 이미 실행 중입니다.');return 0
+        QMessageBox.information(None,APP_NAME,'프로그램이 이미 실행 중입니다.');return 0
     window=Window();window.show()
     if '--smoke' in sys.argv:
         def snapshot():

@@ -8,6 +8,7 @@ def main():
     args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--windowed',
           '--name','LocalMeeting','--onedir','--distpath',str(ROOT/'dist'),'--workpath',str(ROOT/'build'),
           '--specpath',str(ROOT/'build'),'--paths',str(ROOT),
+          '--version-file',str(ROOT/'version_info.txt'),
           '--collect-all','sherpa_onnx','--collect-all','sherpa_onnx_core',
           '--collect-all','faster_whisper','--collect-all','ctranslate2',
           '--collect-all','pyaudiowpatch','--collect-all','onnxruntime',
@@ -26,11 +27,12 @@ def main():
     for p in llama.iterdir():
         if p.suffix=='.dll' or p.name in ['llama-server.exe','LICENSE-LLVM-OpenMP']:
             shutil.copy2(p,target/p.name)
-    for name in ['komix','large-v3','llm']:
+    for name in ['large-v3','llm']:
         shutil.copytree(ROOT/'models'/name,dest/'models'/name,dirs_exist_ok=True)
     for name in ['speaker.onnx','segmentation.onnx']:shutil.copy2(ROOT/'models'/name,dest/'models'/name)
     for name in ['README.md','LICENSE','THIRD_PARTY.md']:
         if (ROOT/name).exists():shutil.copy2(ROOT/name,dest/name)
-    print(str(dest/'LocalMeeting.exe'),flush=True)
+    (dest/'LocalMeeting.exe').replace(dest/'KhansMinutes.exe')
+    print(str(dest/'KhansMinutes.exe'),flush=True)
 
 if __name__=='__main__':main()

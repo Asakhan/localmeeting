@@ -4,7 +4,7 @@ import subprocess, time, json, shutil, os, psutil
 from core import ROOT,settings,atomic_json,read_json
 
 def main():
-    exe=ROOT/'dist/LocalMeeting/LocalMeeting.exe'
+    exe=ROOT/'dist/LocalMeeting/KhansMinutes.exe'
     folder=ROOT/'test-output'/f'exe-meeting-{time.time_ns()}';folder.mkdir(parents=True,exist_ok=True)
     audio=folder/'audio';audio.mkdir(exist_ok=True)
     shutil.copy2(ROOT/'test-output/ko.wav',audio/'mic_0000000.wav')
