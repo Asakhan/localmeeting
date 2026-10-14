@@ -4,6 +4,13 @@ import os, sys, time, subprocess, gc, json, traceback
 from core import atomic_json, read_json, append_jsonl, ROOT
 
 _DLL_HANDLES=[]
+def credible_segment(segment):
+    # Whisper can append a whole invented sentence at a zero-length audio tail.
+    # Keep short actual syllables, reject multi-character near-zero-duration text.
+    import re
+    chars=len(re.sub(r'\W','',segment.text,flags=re.UNICODE))
+    return not (segment.end-segment.start<0.08 and chars>=3)
+
 def runtime_setup(threads=4):
     for key in ['OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','NUMEXPR_NUM_THREADS']:
         os.environ[key]=str(threads)
@@ -96,6 +103,7 @@ class SpeechEngine:
             mapping[speaker_id]=self.speaker(self.embedding(voice),meta['source'])
         rows=[]
         for segment in segments:
+            if not credible_segment(segment):continue
             if segment.no_speech_prob>0.85 and segment.avg_logprob < -0.8:continue
             words=segment.words or []
             if not words:
@@ -137,8 +145,12 @@ def run_transcription(folder):
         if psutil.virtual_memory().available<4*1024**3:
             raise RuntimeError('사용 가능한 RAM이 4GB 미만입니다. 다른 앱을 닫은 후 재처리하세요. 녹음은 보존됩니다.')
         engine=SpeechEngine(config,folder)
-        saved=[read_json(p,{}) for p in (folder/'results').glob('*.json')]
-        if saved:engine.centroids=max(saved,key=lambda d:d.get('order',0)).get('centroids',[])
+        checkpoints=[(p,read_json(p,{})) for p in (folder/'results').glob('*.json')]
+        previous=None
+        if checkpoints:
+            previous,state=max(checkpoints,key=lambda item:item[1].get('order',0))
+            engine.centroids=state.get('centroids',[])
+        del checkpoints
         rebuild_transcript(folder)
         while True:
             jobs=[]
@@ -155,7 +167,13 @@ def run_transcription(folder):
                 event(folder,'transcribing',f'발언 분석 중 · 대기 {len(jobs)}개',device=engine.device)
                 started=time.perf_counter()
                 rows=engine.process(folder/'audio'/j['file'],j)
-                atomic_json(folder/'results'/(p.stem+'.json'),dict(rows=rows,centroids=engine.centroids,order=time.time(),seconds=time.perf_counter()-started,duration=j['duration']))
+                current=folder/'results'/(p.stem+'.json')
+                atomic_json(current,dict(rows=rows,centroids=engine.centroids,order=time.time(),seconds=time.perf_counter()-started,duration=j['duration']))
+                if previous and previous!=current:
+                    old=read_json(previous,{})
+                    if 'centroids' in old:
+                        old.pop('centroids',None);atomic_json(previous,old)
+                previous=current
                 rebuild_transcript(folder)
                 event(folder,'listening','실시간 기록 중',device=engine.device,speakers=len(engine.centroids))
         event(folder,'transcribed','전사 완료 · 음성 모델 해제 중')

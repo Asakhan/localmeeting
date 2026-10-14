@@ -6,7 +6,7 @@ from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QHBoxLayout,QVBoxLayout,QLabel,
     QPushButton,QStackedWidget,QFrame,QTextBrowser,QListWidget,QListWidgetItem,QLineEdit,
     QComboBox,QCheckBox,QSpinBox,QDoubleSpinBox,QFormLayout,QFileDialog,QMessageBox,
-    QTableWidget,QTableWidgetItem,QHeaderView,QProgressBar,QSplitter)
+    QTableWidget,QTableWidgetItem,QHeaderView,QProgressBar,QSplitter,QScrollArea)
 from core import (ROOT, DATA, settings, atomic_json, read_json, new_meeting, now, stamp,
                   transcript, display, SECTIONS, export_docx, export_text)
 
@@ -27,6 +27,7 @@ QPushButton:disabled {color:#99A8AD;background:#EDF0F2;}
 QPushButton#primary {background:#187968;color:white;border:0;font-weight:bold;}
 QPushButton#primary:hover {background:#126453;}
 QPushButton#danger {background:#B74E4E;color:white;border:0;}
+QPushButton#danger:disabled {background:#E5DDDD;color:#AFA3A3;}
 QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox {background:white;border:1px solid #D7E1E6;border-radius:6px;padding:8px;}
 QTextBrowser,QListWidget,QTableWidget {background:white;border:1px solid #DEE6EA;border-radius:9px;padding:8px;selection-background-color:#D5EDE5;selection-color:#163B36;}
 QHeaderView::section {background:#EAF0F3;border:0;padding:8px;font-weight:bold;}
@@ -63,10 +64,21 @@ class Window(QMainWindow):
         self.statusBar().showMessage('준비됨 · 녹음이 끝나면 회의록과 전체 전사를 저장합니다.')
         self.timer=QTimer(self);self.timer.timeout.connect(self.tick);self.timer.start(500)
 
+    def showEvent(self,event):
+        super().showEvent(event)
+        if not getattr(self,'placed',False):
+            self.placed=True
+            # Windows can apply its first monitor-DPI transition after construction.
+            QTimer.singleShot(50,self.fit_window)
+
+    def fit_window(self):
+        screen=self.screen().availableGeometry()
+        self.resize(max(960,min(1180,screen.width()-60)),max(660,min(800,screen.height()-60)))
+
     def page(self,title,subtitle):
         w=QWidget();v=QVBoxLayout(w);v.setContentsMargins(30,28,30,24);v.setSpacing(16)
         header=QHBoxLayout();titles=QVBoxLayout();titles.addWidget(label(title,'title'));titles.addWidget(label(subtitle,'subtitle'))
-        header.addLayout(titles,1);header.addWidget(label('●  로컬 전용','badge'));v.addLayout(header);self.pages.addWidget(w)
+        header.addLayout(titles,1);header.addWidget(label('●  로컬 전용','badge'),0,Qt.AlignTop);v.addLayout(header);self.pages.addWidget(w)
         return w,v
 
     def build_recording(self):
@@ -85,16 +97,18 @@ class Window(QMainWindow):
         w,v=self.page('회의록 보기','회의록을 확인하고 참석자 이름을 입력하세요. 전체 문서에 함께 반영됩니다.')
         top=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText('회의 제목 검색');self.search.textChanged.connect(self.refresh_library)
         top.addWidget(self.search,1);top.addWidget(button('폴더 열기',lambda:self.open_path(self.config['folder'])));top.addWidget(button('새로고침',self.refresh_library));v.addLayout(top)
-        split=QSplitter();self.meetings=QListWidget();self.meetings.currentItemChanged.connect(self.select_meeting);split.addWidget(self.meetings)
+        split=QSplitter();self.meetings=QListWidget();self.meetings.setMinimumWidth(190);self.meetings.setWordWrap(True);self.meetings.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.meetings.currentItemChanged.connect(self.select_meeting);split.addWidget(self.meetings)
         right=QWidget();rv=QVBoxLayout(right);rv.setContentsMargins(0,0,0,0);self.preview=QTextBrowser();rv.addWidget(self.preview,1)
-        self.names=QTableWidget(0,2);self.names.setHorizontalHeaderLabels(['감지된 화자','실제 이름']);self.names.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.names.setMaximumHeight(145);rv.addWidget(self.names)
-        actions=QHBoxLayout();self.rename_button=button('이름 일괄 적용',self.save_names);self.word_button=button('Word 열기',self.open_word);self.txt_button=button('전체 전사 열기',self.open_text);self.retry_button=button('다시 처리',self.retry)
+        self.names=QTableWidget(0,2);self.names.setHorizontalHeaderLabels(['감지된 화자','실제 이름']);self.names.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.names.setMaximumHeight(120);rv.addWidget(self.names)
+        actions=QHBoxLayout();self.rename_button=button('이름 적용',self.save_names);self.word_button=button('Word 열기',self.open_word);self.txt_button=button('전체 전사',self.open_text);self.retry_button=button('다시 처리',self.retry)
         for b in [self.rename_button,self.word_button,self.txt_button,self.retry_button]:actions.addWidget(b)
         rv.addLayout(actions);split.addWidget(right);split.setSizes([260,620]);v.addWidget(split,1)
 
     def build_settings(self):
         self.settings_page,v=self.page('설정','회의 환경에 필요한 항목만 설정합니다. 저장된 설정은 다음 회의부터 적용됩니다.')
-        form=QFormLayout();form.setSpacing(16)
+        scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setFrameShape(QFrame.NoFrame)
+        form_widget=QWidget();form=QFormLayout(form_widget);form.setSpacing(16);form.setContentsMargins(0,4,12,4)
+        scroll.setWidget(form_widget)
         row=QHBoxLayout();self.folder_edit=QLineEdit(self.config['folder']);row.addWidget(self.folder_edit,1);row.addWidget(button('찾아보기',self.choose_folder));form.addRow('회의록 저장 폴더',row)
         self.language=QComboBox();self.language.addItem('한국어 전용 · 한국어 특화 Whisper', 'ko');self.language.addItem('한국어 + English · Whisper large-v3','mixed');self.language.setCurrentIndex(0 if self.config['language']=='ko' else 1);form.addRow('회의 언어',self.language)
         self.mic=QComboBox();self.mic.addItem('Windows 기본 마이크',-1)
@@ -111,7 +125,8 @@ class Window(QMainWindow):
         self.device=QComboBox();self.device.addItem('자동 · GPU 우선, 여유 부족 시 CPU','auto');self.device.addItem('CPU만 사용','cpu');self.device.setCurrentIndex(1 if self.config['device']=='cpu' else 0);form.addRow('처리 장치',self.device)
         self.threshold=QDoubleSpinBox();self.threshold.setRange(.4,.85);self.threshold.setSingleStep(.05);self.threshold.setValue(self.config['speaker_threshold']);form.addRow('화자 구분 민감도',self.threshold)
         form.addRow('',label('화자가 너무 많이 나뉘면 값을 낮추고, 다른 사람이 합쳐지면 높이세요. 이름 수정은 회의록 보기에서 가능합니다.','subtitle'))
-        v.addLayout(form);v.addStretch();self.model_status=label('','subtitle');v.addWidget(self.model_status)
+        for widget in [self.folder_edit,self.language,self.mic,self.glossary,self.threads,self.device,self.threshold]:widget.setMinimumHeight(36)
+        v.addWidget(scroll,1);self.model_status=label('','subtitle');v.addWidget(self.model_status)
         v.addWidget(button('설정 저장',self.save_settings,'primary'),alignment=Qt.AlignRight)
 
     def navigate(self,index):
@@ -222,6 +237,9 @@ class Window(QMainWindow):
                 else:self.finish_active(True)
 
     def finish_active(self,success):
+        if self.worker and self.worker.poll() is None:
+            for job in self.jobs:job.close()
+            self.jobs=[];self.worker.wait(timeout=10);self.worker=None;self.worker_log.close()
         if self.active:
             meta=read_json(self.active/'meeting.json',{})
             if not success:

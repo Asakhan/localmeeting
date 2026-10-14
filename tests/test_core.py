@@ -33,6 +33,10 @@ class MeetingTests(unittest.TestCase):
         atomic_json(self.root/'capture_done.json',dict(errors=['device disconnected']))
         finalize_outputs(self.root)
         self.assertTrue((self.root/'audio'/'mic_000.wav').exists())
+    def test_orphan_audio_is_never_deleted(self):
+        (self.root/'audio'/'orphan.wav').write_bytes(b'audio')
+        finalize_outputs(self.root)
+        self.assertTrue((self.root/'audio'/'orphan.wav').exists())
     def test_incomplete_tail_keeps_audio(self):
         (self.root/'audio'/'mic_1.part.wav').write_bytes(b'x')
         finalize_outputs(self.root)
@@ -50,5 +54,13 @@ class MeetingTests(unittest.TestCase):
     def test_trailing_interrupted_jsonl(self):
         with (self.root/'transcript.jsonl').open('a',encoding='utf-8') as f:f.write('{"broken":')
         self.assertEqual(len(transcript(self.root)),1)
+    def test_llm_spaced_speaker_ids_are_normalized(self):
+        data=validate_minutes(dict(title='회의',actions=[dict(owner='참석자 2',due='미정',task='검토')]))
+        self.assertEqual(data['actions'][0]['owner'],'참석자2')
+    def test_zero_duration_hallucination_is_rejected(self):
+        from engine import credible_segment
+        from types import SimpleNamespace
+        self.assertFalse(credible_segment(SimpleNamespace(start=3.48,end=3.50,text='아버지 뭐하시노.')))
+        self.assertTrue(credible_segment(SimpleNamespace(start=3,end=3.2,text='네.')))
 
 if __name__=='__main__':unittest.main()

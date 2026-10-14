@@ -67,6 +67,12 @@ def empty_minutes(reason='발언에서 확인되지 않음'):
     return dict(title='회의 기록', **{k: [] for k,_ in SECTIONS}, note=reason)
 
 def validate_minutes(data):
+    def normalize(value):
+        if isinstance(value,str):return re.sub(r'참석자\s+(\d+)',r'참석자\1',value)
+        if isinstance(value,list):return [normalize(x) for x in value]
+        if isinstance(value,dict):return {k:normalize(v) for k,v in value.items()}
+        return value
+    data=normalize(data)
     if not isinstance(data, dict) or not isinstance(data.get('title'), str):
         raise ValueError('회의록 응답 형식이 올바르지 않습니다.')
     result = {'title': data['title'][:160] or '회의 기록'}
@@ -109,6 +115,9 @@ def export_docx(folder):
                         ('참석자', f"음성으로 추정한 {len(speakers)}명 · "+', '.join(names.get(s,s) for s in speakers))]:
         cells=table.add_row().cells; cells[0].text=label; cells[1].text=value
     if raw.get('note'): doc.add_paragraph(raw['note'])
+    capture=read_json(folder/'capture_done.json',{})
+    if capture.get('errors'):
+        doc.add_paragraph('녹음 확인 필요: '+ '; '.join(capture['errors'])+' · 일부 발언이 누락되었을 수 있습니다.')
     for key,title in SECTIONS:
         doc.add_heading(title, level=1)
         values=minutes.get(key,[])
@@ -164,8 +173,15 @@ def finalize_outputs(folder, allow_delete=True):
     if not text.read_text(encoding='utf-8-sig').strip():raise RuntimeError('전체 전사 저장 확인 실패')
     meta=read_json(folder/'meeting.json',{})
     capture=read_json(folder/'capture_done.json',{})
-    missing=[p for p in (folder/'audio').glob('*.json') if 'file' in (read_json(p,{}) or {}) and not (folder/'results'/p.name).exists()]
-    can_delete=allow_delete and not missing and not capture.get('errors') and not list((folder/'audio').glob('*.part.wav'))
+    missing=[]
+    # Every audio file must have a valid handoff AND a committed result.
+    for wave in (folder/'audio').glob('*.wav'):
+        handoff=read_json(wave.with_suffix('.json'),{})
+        result=read_json(folder/'results'/(wave.stem+'.json'))
+        if handoff.get('file')!=wave.name or not isinstance(result,dict) or 'rows' not in result:
+            missing.append(wave.name)
+    can_delete=(allow_delete and (folder/'capture_done.json').exists() and bool(transcript(folder))
+                and not missing and not capture.get('errors') and not list((folder/'audio').glob('*.part.wav')))
     if can_delete:
         audio=(folder/'audio').resolve()
         if audio.parent!=folder or audio.is_symlink():raise RuntimeError('오디오 폴더 경로 확인 실패')
@@ -173,6 +189,11 @@ def finalize_outputs(folder, allow_delete=True):
             if p.is_file() and not p.is_symlink() and p.suffix.lower() in ('.wav','.json'):
                 p.unlink()
         meta['audio_deleted']=True
+        # Final records retain text, not reusable voice embeddings or bulky checkpoints.
+        for p in (folder/'results').glob('*.json'):
+            value=read_json(p,{})
+            if 'centroids' in value:
+                value.pop('centroids',None);atomic_json(p,value)
     else:meta['audio_deleted']=False
     meta['docx']=doc.name;meta['state']='complete' if can_delete else 'review'
     atomic_json(folder/'meeting.json',meta)

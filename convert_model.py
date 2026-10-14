@@ -2,7 +2,7 @@
 import sys,os
 root=Path(__file__).resolve().parent
 os.environ['OMP_NUM_THREADS']='4'
-sys.path.append(str(Path.home()/'Documents/tools/local_minutes/.venv/Lib/site-packages'))
+sys.path.append(str(root/'.venv/Lib/site-packages'))
 import torch
 torch.set_num_threads(4)
 from ctranslate2.converters import TransformersConverter

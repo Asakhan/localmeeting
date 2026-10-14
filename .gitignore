@@ -5,3 +5,12 @@ dist/
 __pycache__/
 test-output/
 *.log
+runtime/
+*.spec
+*.wav
+*.flac
+*.docx
+*.gguf
+*.onnx
+*.safetensors
+*.part
