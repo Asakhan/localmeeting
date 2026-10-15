@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QHBoxLayout,QVBo
     QComboBox,QCheckBox,QSpinBox,QDoubleSpinBox,QFormLayout,QFileDialog,QMessageBox,
     QTableWidget,QTableWidgetItem,QHeaderView,QProgressBar,QSplitter,QScrollArea)
 from core import (ROOT, DATA, APP_NAME, APP_ENGLISH, settings, atomic_json, read_json, new_meeting, now, stamp,
-                  transcript, display, SECTIONS, export_docx, export_text)
+                  transcript, display, SECTIONS, export_docx, export_text, export_minutes_text)
 
 STYLE='''
 QMainWindow,QWidget {background:#F5F7F9;color:#182C37;font-family:"Malgun Gothic";font-size:13px;}
@@ -125,6 +125,7 @@ class Window(QMainWindow):
         self.threads=QSpinBox();self.threads.setRange(2,6);self.threads.setValue(self.config['threads']);form.addRow('분석 CPU 스레드',self.threads)
         self.device=QComboBox();self.device.addItem('자동 · GPU 우선, 여유 부족 시 CPU','auto');self.device.addItem('CPU만 사용','cpu');self.device.setCurrentIndex(1 if self.config['device']=='cpu' else 0);form.addRow('처리 장치',self.device)
         self.threshold=QDoubleSpinBox();self.threshold.setRange(.4,.85);self.threshold.setSingleStep(.05);self.threshold.setValue(self.config['speaker_threshold']);form.addRow('화자 구분 민감도',self.threshold)
+        self.expected_speakers=QSpinBox();self.expected_speakers.setRange(0,32);self.expected_speakers.setSpecialValueText('자동');self.expected_speakers.setValue(self.config.get('speaker_count',0));form.addRow('발언할 인원 (알고 있는 경우)',self.expected_speakers)
         form.addRow('',label('화자가 너무 많이 나뉘면 값을 낮추고, 다른 사람이 합쳐지면 높이세요. 이름 수정은 회의록 보기에서 가능합니다.','subtitle'))
         for widget in [self.folder_edit,self.language,self.mic,self.glossary,self.threads,self.device,self.threshold]:widget.setMinimumHeight(36)
         v.addWidget(scroll,1);self.model_status=label('','subtitle');v.addWidget(self.model_status)
@@ -140,7 +141,7 @@ class Window(QMainWindow):
             self.model_status.setText('오프라인 모델 준비 완료 · 녹음 중에는 회의록 모델을 실행하지 않습니다.' if not missing else '누락된 모델: '+', '.join(missing))
 
     def missing_models(self,config):
-        root=Path(config['model_root']);names=['large-v3/model.bin','large-v3/tokenizer.json','speaker.onnx','segmentation.onnx','llm/Qwen3.5-9B-Q4_K_M.gguf']
+        root=Path(config['model_root']);names=['large-v3/model.bin','large-v3/tokenizer.json','speaker-eres2net.onnx','segmentation-fp32.onnx','kogrammar/model.bin','llm/Qwen3.5-9B-Q4_K_M.gguf']
         return [name for name in names if not (root/name).exists()]
 
     def choose_folder(self):
@@ -154,7 +155,7 @@ class Window(QMainWindow):
             folder.mkdir(parents=True,exist_ok=True)
             self.config.update(folder=str(folder),language=self.language.currentData(),microphone=self.mic.currentData(),
                 system_audio=self.system_audio.isChecked(),threads=self.threads.value(),device=self.device.currentData(),
-                glossary=self.glossary.text(),speaker_threshold=self.threshold.value())
+                glossary=self.glossary.text(),speaker_threshold=self.threshold.value(),speaker_count=self.expected_speakers.value())
             atomic_json(DATA/'settings.json',self.config);self.statusBar().showMessage('설정을 저장했습니다.')
         except Exception as e:self.error(str(e))
 
@@ -305,7 +306,7 @@ class Window(QMainWindow):
             names={self.names.item(i,0).text():self.names.item(i,1).text().strip() for i in range(self.names.rowCount()) if self.names.item(i,1).text().strip()}
             atomic_json(self.selected/'names.json',names);export_text(self.selected)
             if (self.selected/'minutes.json').exists():
-                doc=export_docx(self.selected);meta=read_json(self.selected/'meeting.json',{});meta['docx']=doc.name;atomic_json(self.selected/'meeting.json',meta)
+                doc=export_docx(self.selected);export_minutes_text(self.selected);meta=read_json(self.selected/'meeting.json',{});meta['docx']=doc.name;atomic_json(self.selected/'meeting.json',meta)
             self.select_meeting(self.meetings.currentItem());self.statusBar().showMessage('이름을 회의록과 전체 전사에 일괄 반영했습니다.')
         except Exception as e:self.error(str(e))
 
@@ -315,7 +316,7 @@ class Window(QMainWindow):
             from capture import recover_partial
             folder=self.selected;meta=read_json(folder/'meeting.json',{})
             # Retry uses current installed model location, preserves meeting language.
-            meta['config'].update(model_root=self.config['model_root'],threads=self.config['threads'],device=self.config['device'])
+            meta['config'].update(model_root=self.config['model_root'],threads=self.config['threads'],device=self.config['device'],speaker_count=self.config.get('speaker_count',0))
             meta['ended']=meta.get('ended') or datetime.fromtimestamp((folder/'meeting.json').stat().st_mtime).astimezone().isoformat(timespec='seconds')
             if not (folder/'capture_done.json').exists():
                 recover_partial(folder);atomic_json(folder/'capture_done.json',dict(ended=meta['ended'],errors=['비정상 종료에서 복구됨: 녹음 누락 여부를 확인하세요.']))

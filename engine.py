@@ -53,9 +53,9 @@ class SpeechEngine:
         event(folder,'loading',f'음성 모델 준비 중 · {self.device.upper()}'+(' · 실시간 표시가 지연될 수 있습니다.' if self.device=='cpu' else ''))
         self.whisper=WhisperModel(str(modelroot/choice),device=self.device,
             compute_type='int8_float16' if self.device=='cuda' else 'int8',cpu_threads=config['threads'],num_workers=1,local_files_only=True)
-        emb=so.SpeakerEmbeddingExtractorConfig(model=str(modelroot/'speaker.onnx'),num_threads=2,provider='cpu')
+        emb=so.SpeakerEmbeddingExtractorConfig(model=str(modelroot/'speaker-eres2net.onnx'),num_threads=2,provider='cpu')
         self.extractor=so.SpeakerEmbeddingExtractor(emb)
-        seg=so.OfflineSpeakerSegmentationModelConfig(pyannote=so.OfflineSpeakerSegmentationPyannoteModelConfig(model=str(modelroot/'segmentation.onnx')),num_threads=2,provider='cpu')
+        seg=so.OfflineSpeakerSegmentationModelConfig(pyannote=so.OfflineSpeakerSegmentationPyannoteModelConfig(model=str(modelroot/'segmentation-fp32.onnx')),num_threads=2,provider='cpu')
         cfg=so.OfflineSpeakerDiarizationConfig(segmentation=seg,embedding=emb,
              clustering=so.FastClusteringConfig(num_clusters=-1,threshold=0.5),min_duration_on=0.3,min_duration_off=0.25)
         self.diarizer=so.OfflineSpeakerDiarization(cfg)
@@ -69,11 +69,12 @@ class SpeechEngine:
         vec=self.np.asarray(self.extractor.compute(stream),dtype=self.np.float32)
         return vec/(self.np.linalg.norm(vec)+1e-8)
 
-    def speaker(self,vec,source):
+    def speaker(self,vec,source,excluded=()):
         if vec is None:return '화자 미확인'
         np=self.np
-        scores=[float(np.dot(vec,x['vec'])) if x['source']==source else -1. for x in self.centroids]
-        if scores and max(scores)>=self.config.get('speaker_threshold',0.65):
+        scores=[float(np.dot(vec,x['vec'])) if x['source']==source and f'참석자{i+1}' not in excluded else -1. for i,x in enumerate(self.centroids)]
+        threshold=max(.1,self.config.get('speaker_threshold',0.65)-.3)
+        if scores and max(scores)>=threshold:
             i=int(np.argmax(scores));old=self.centroids[i]
             # Slow update prevents short/noisy turns from moving identity abruptly.
             v=np.asarray(old['vec'])*0.9+vec*0.1
@@ -116,7 +117,7 @@ class SpeechEngine:
             pieces=[audio[int(s.start*16000):int(s.end*16000)] for s in turns if s.speaker==speaker_id]
             # Embedding only speech spans, capped at 12s.
             voice=np.concatenate(pieces) if pieces else np.array([],dtype=np.float32)
-            mapping[speaker_id]=self.speaker(self.embedding(voice),meta['source'])
+            mapping[speaker_id]=self.speaker(self.embedding(voice),meta['source'],mapping.values())
         rows=[]
         for segment in segments:
             if not credible_segment(segment):
@@ -142,7 +143,8 @@ class SpeechEngine:
                 start=meta['offset']+w.start;end=meta['offset']+w.end
                 if rows and rows[-1]['speaker']==speaker and start-rows[-1]['end']<1.2:
                     rows[-1]['text']+=text;rows[-1]['end']=end
-                else:rows.append(dict(start=start,end=end,speaker=speaker,text=text,source=meta['source']))
+                else:rows.append(dict(start=start,end=end,speaker=speaker,text=text,source=meta['source'],words=[]))
+                rows[-1]['words'].append(dict(start=start,end=end,text=text))
         for row in rows:row['text']=row['text'].strip()
         return [r for r in rows if r['text']]
 
@@ -172,7 +174,9 @@ def run_transcription(folder):
         previous=None
         if checkpoints:
             previous,state=max(checkpoints,key=lambda item:item[1].get('order',0))
-            engine.centroids=state.get('centroids',[])
+            # Old WeSpeaker checkpoints contain 256-D vectors; ERes2Net uses
+            # 512-D vectors. Never compare embeddings from different models.
+            engine.centroids=state.get('centroids',[]) if state.get('embedding_revision')=='eres2net-v1' else []
         del checkpoints
         rebuild_transcript(folder)
         while True:
@@ -191,7 +195,7 @@ def run_transcription(folder):
                 started=time.perf_counter()
                 rows=engine.process(folder/'audio'/j['file'],j)
                 current=folder/'results'/(p.stem+'.json')
-                atomic_json(current,dict(rows=rows,centroids=engine.centroids,order=time.time(),seconds=time.perf_counter()-started,duration=j['duration'],quality=engine.last_quality))
+                atomic_json(current,dict(rows=rows,centroids=engine.centroids,embedding_revision='eres2net-v1',order=time.time(),seconds=time.perf_counter()-started,duration=j['duration'],quality=engine.last_quality))
                 if previous and previous!=current:
                     old=read_json(previous,{})
                     if 'centroids' in old:
@@ -199,6 +203,11 @@ def run_transcription(folder):
                 previous=current
                 rebuild_transcript(folder)
                 event(folder,'listening','실시간 기록 중',device=engine.device,speakers=len(engine.centroids))
+        del engine
+        gc.collect()
+        from diarization import rediarize
+        from core import transcript
+        if transcript(folder):rediarize(folder,config)
         event(folder,'transcribed','전사 완료 · 음성 모델 해제 중')
         return 0
     except Exception as e:

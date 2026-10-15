@@ -34,7 +34,9 @@ if __name__=='__main__':
             assert not failures,failures
             assert window.selected is not None
             meta=read_json(window.selected/'meeting.json')
-            assert meta.get('audio_deleted'),meta
+            if read_json(window.selected/'diarization.json',{}).get('review_rows',0):
+                assert not meta.get('audio_deleted'),meta
+            else:assert meta.get('audio_deleted'),meta
             assert window.names.rowCount()>=1
             window.names.setItem(0,1,QTableWidgetItem('테스트 참석자'))
             window.rename_button.click()

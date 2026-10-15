@@ -37,8 +37,16 @@ def main():
             print(read_json(folder/'worker_status.json'),flush=True);raise SystemExit(process.returncode)
     atomic_json(ROOT/'test-output/exe_metrics.json',metrics)
     assert (folder/'회의록.docx').exists()
+    assert (folder/'회의록_요약.txt').exists()
+    from docx import Document
+    assert all(p.text!='발언 기록' for p in Document(folder/'회의록.docx').paragraphs)
     assert (folder/'전체전사.txt').exists()
-    assert not list(audio.glob('*.wav')), 'Audio must be deleted after success'
+    review=read_json(folder/'diarization.json',{}).get('review_rows',0)
+    if review:
+        assert list(audio.glob('*.wav')), 'Uncertain speakers require preserving audio'
+        assert read_json(folder/'meeting.json')['state']=='review'
+    else:
+        assert not list(audio.glob('*.wav')), 'Validated outputs should permit audio deletion'
     print('EXE END-TO-END PASS',flush=True)
 
 if __name__=='__main__':main()

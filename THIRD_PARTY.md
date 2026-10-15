@@ -5,6 +5,9 @@
 - PySide6 / Qt: LGPLv3/GPLv3 또는 상용 라이선스. 동적 DLL로 배포하며 설치 폴더에서 교체 가능. https://doc.qt.io/qtforpython-6/licenses.html
 - faster-whisper: MIT. https://github.com/SYSTRAN/faster-whisper
 - CTranslate2: MIT. https://github.com/OpenNMT/CTranslate2
+- Kiwi / kiwipiepy 0.23.1: LGPLv3. 모델·패키지 파일은 `_internal/kiwipiepy_model`에 별도 배포되어 교체 가능. https://github.com/bab2min/kiwipiepy
+- KoGrammar-base: MIT, KoBART 기반 국립국어원 맞춤법 교정 말뭉치 학습 모델. CTranslate2 INT8/FP16 변환. https://huggingface.co/theSOL1/kogrammar-base
+- 3D-Speaker ERes2Net: Apache-2.0 원 프로젝트 및 ONNX 배포 조건. https://github.com/modelscope/3D-Speaker / https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models
 - Whisper: MIT. https://github.com/openai/whisper
 - 한국어 특화 가중치: https://huggingface.co/seastar105/whisper-medium-komixv2 (모델 카드 및 학습 데이터 이용 조건 참조)
 - sherpa-onnx: Apache-2.0. https://github.com/k2-fsa/sherpa-onnx

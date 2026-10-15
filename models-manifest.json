@@ -1,15 +1,5 @@
 [
   {
-    "path": "models/segmentation.onnx",
-    "bytes": 1540506,
-    "sha256": "d582f4b4c6b48205de7e0643c57df0df5615a3c176189be3fc461e9d18827b5d"
-  },
-  {
-    "path": "models/speaker.onnx",
-    "bytes": 26534365,
-    "sha256": "5ef208a9da1453335308a6b6f4e6dfbd7e183a38b604de0a57664f45d257fe94"
-  },
-  {
     "path": "models/komix/model.bin",
     "bytes": 769156493,
     "sha256": "635bac96182db59eba7c0f475cb814699e20c770478c5064f63b697094ee3ca9"
@@ -23,5 +13,25 @@
     "path": "models/llm/Qwen3.5-9B-Q4_K_M.gguf",
     "bytes": 5680522464,
     "sha256": "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8"
+  },
+  {
+    "path": "models/segmentation-fp32.onnx",
+    "bytes": 5992913,
+    "sha256": "220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079"
+  },
+  {
+    "path": "models/kogrammar/model.bin",
+    "bytes": 126124300,
+    "sha256": "9b3a73fc9d8d1a3307918c278dba39486cbea784ee06acc3b1622cfd1647a64b"
+  },
+  {
+    "path": "models/kogrammar/tokenizer.json",
+    "bytes": 1513149,
+    "sha256": "b55ad76c7d17bbaa65f16c18757d3f8ccbe9920b7bb3f83875144207355c608e"
+  },
+  {
+    "path": "models/speaker-eres2net.onnx",
+    "bytes": 39593761,
+    "sha256": "1a331345f04805badbb495c775a6ddffcdd1a732567d5ec8b3d5749e3c7a5e4b"
   }
 ]

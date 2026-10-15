@@ -27,8 +27,9 @@ hf('Systran/faster-whisper-large-v3','large-v3')
 hf('unsloth/Qwen3.5-9B-GGUF','llm',['Qwen3.5-9B-Q4_K_M.gguf'])
 base='https://github.com/k2-fsa/sherpa-onnx/releases/download/'
 download(base+'speaker-recongition-models/wespeaker_en_voxceleb_resnet34.onnx',MODELS/'speaker.onnx')
+download(base+'speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx',MODELS/'speaker-eres2net.onnx')
 download(base+'speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2',MODELS/'segmentation.tar.bz2')
 with tarfile.open(MODELS/'segmentation.tar.bz2') as t:
-    m=next(m for m in t.getmembers() if m.name.endswith('/model.int8.onnx'))
-    with t.extractfile(m) as f,open(MODELS/'segmentation.onnx','wb') as o: shutil.copyfileobj(f,o)
+    m=next(m for m in t.getmembers() if m.name.endswith('/model.onnx'))
+    with t.extractfile(m) as f,open(MODELS/'segmentation-fp32.onnx','wb') as o: shutil.copyfileobj(f,o)
 print('ALL MODELS READY',flush=True)

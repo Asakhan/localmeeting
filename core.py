@@ -41,7 +41,7 @@ def read_json(path, default=None):
 def settings():
     defaults = dict(folder=str(DEFAULT_FOLDER), language='ko', system_audio=False,
                     microphone=-1, threads=4, speaker_threshold=0.65, glossary='',
-                    device='auto', model_root=str(ROOT / 'models'))
+                    device='auto', speaker_count=0, model_root=str(ROOT / 'models'))
     defaults.update(read_json(DATA / 'settings.json', {}) or {})
     defaults['glossary']=recognition_glossary(defaults.get('glossary',''))
     return defaults
@@ -96,6 +96,8 @@ def validate_minutes(data):
         else:
             if any(not isinstance(x,str) for x in value): raise ValueError(f'{key} 내용 형식 오류')
             result[key] = value
+    if isinstance(data.get('schedule_evidence'),list):
+        result['schedule_evidence']=[x for x in data['schedule_evidence'] if isinstance(x,dict)]
     return result
 
 def export_docx(folder):
@@ -124,7 +126,7 @@ def export_docx(folder):
     for label,value in [('회의명', minutes.get('title','회의 기록')), ('일시', f"{meta.get('started','')} ~ {meta.get('ended','진행 중')}"),
                         ('참석자', f"음성으로 추정한 {len(speakers)}명 · "+', '.join(names.get(s,s) for s in speakers))]:
         cells=table.add_row().cells; cells[0].text=label; cells[1].text=value
-    if raw.get('note'): doc.add_paragraph(raw['note'])
+    if minutes.get('note'): doc.add_paragraph(minutes['note'])
     capture=read_json(folder/'capture_done.json',{})
     if capture.get('errors'):
         doc.add_paragraph('녹음 확인 필요: '+ '; '.join(capture['errors'])+' · 일부 발언이 누락되었을 수 있습니다.')
@@ -140,12 +142,6 @@ def export_docx(folder):
                 for c,k in zip(t.add_row().cells,['owner','due','task']):c.text=str(row.get(k,'미정'))
         else:
             for value in values: doc.add_paragraph(str(value),style='List Bullet')
-    doc.add_page_break();doc.add_heading('발언 기록',level=1)
-    doc.add_paragraph('화자와 참석 인원은 음성 기반 추정입니다. 겹침 발화·짧은 발언은 확인이 필요합니다.')
-    for row in rows:
-        p=doc.add_paragraph()
-        p.add_run(f"[{stamp(row['start'])}] {names.get(row['speaker'],row['speaker'])}  ").bold=True
-        p.add_run(display(row['text'],names))
     target=folder/'회의록.docx'
     temp=folder/'회의록.tmp.docx';doc.save(temp)
     try:os.replace(temp,target)
@@ -173,11 +169,34 @@ def export_text(folder):
     os.replace(temp,folder/'전체전사.txt')
     return folder/'전체전사.txt'
 
+def export_minutes_text(folder):
+    """Summary only; the full transcript remains a separate artifact."""
+    folder=Path(folder)
+    minutes=display(read_json(folder/'minutes.json',empty_minutes()),read_json(folder/'names.json',{}))
+    meta=read_json(folder/'meeting.json',{})
+    names=read_json(folder/'names.json',{})
+    speakers=sorted({r['speaker'] for r in transcript(folder) if re.fullmatch(r'참석자\d+',r['speaker'])},key=lambda s:int(s[3:]))
+    lines=[minutes['title'],f"{meta.get('started','')} ~ {meta.get('ended','')}",
+           '참석자: '+', '.join(names.get(s,s) for s in speakers)]
+    if minutes.get('note'):lines.extend(['',minutes['note']])
+    for key,title in SECTIONS:
+        lines.extend(['',title])
+        values=minutes.get(key,[])
+        if not values:lines.append('확정된 일정 없음' if key=='follow_up' else '해당 사항 없음')
+        for item in values:
+            lines.append('- '+(f"담당: {item['owner']} / 기한: {item['due']} / {item['task']}" if isinstance(item,dict) else item))
+    target=folder/'회의록_요약.txt';temp=target.with_suffix('.tmp')
+    with temp.open('w',encoding='utf-8-sig') as f:
+        f.write('\n'.join(lines)+'\n');f.flush();os.fsync(f.fileno())
+    os.replace(temp,target)
+    return target
+
+
 def finalize_outputs(folder, allow_delete=True):
     """Delete only this meeting's audio, only after all outputs validate."""
     import zipfile
     folder=Path(folder).resolve()
-    doc=export_docx(folder);text=export_text(folder)
+    doc=export_docx(folder);text=export_text(folder);export_minutes_text(folder)
     with zipfile.ZipFile(doc) as z:
         if z.testzip() is not None or 'word/document.xml' not in z.namelist():raise RuntimeError('Word 파일 검증 실패')
     if not text.read_text(encoding='utf-8-sig').strip():raise RuntimeError('전체 전사 저장 확인 실패')
@@ -192,6 +211,9 @@ def finalize_outputs(folder, allow_delete=True):
             missing.append(wave.name)
     can_delete=(allow_delete and (folder/'capture_done.json').exists() and bool(transcript(folder))
                 and not missing and not capture.get('errors') and not list((folder/'audio').glob('*.part.wav')))
+    if read_json(folder/'diarization.json',{}).get('review_rows',0):can_delete=False
+    correction=read_json(folder/'transcript_corrections.json',{})
+    if correction.get('version',1)>=2 and not correction.get('grammar',{}).get('complete'):can_delete=False
     if can_delete:
         audio=(folder/'audio').resolve()
         if audio.parent!=folder or audio.is_symlink():raise RuntimeError('오디오 폴더 경로 확인 실패')

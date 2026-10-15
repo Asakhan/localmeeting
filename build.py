@@ -13,6 +13,7 @@ def main():
           '--collect-all','faster_whisper','--collect-all','ctranslate2',
           '--collect-all','pyaudiowpatch','--collect-all','onnxruntime',
           '--collect-all','tokenizers','--collect-data','docx',
+          '--collect-all','kiwipiepy','--collect-all','kiwipiepy_model',
           '--exclude-module','torch','--exclude-module','transformers',
           '--exclude-module','PySide6.QtWebEngineWidgets','--exclude-module','PySide6.QtWebEngineCore',
           '--exclude-module','PySide6.QtWebEngineQuick']
@@ -27,9 +28,9 @@ def main():
     for p in llama.iterdir():
         if p.suffix=='.dll' or p.name in ['llama-server.exe','LICENSE-LLVM-OpenMP']:
             shutil.copy2(p,target/p.name)
-    for name in ['large-v3','llm']:
+    for name in ['large-v3','llm','kogrammar']:
         shutil.copytree(ROOT/'models'/name,dest/'models'/name,dirs_exist_ok=True)
-    for name in ['speaker.onnx','segmentation.onnx']:shutil.copy2(ROOT/'models'/name,dest/'models'/name)
+    for name in ['speaker-eres2net.onnx','segmentation-fp32.onnx']:shutil.copy2(ROOT/'models'/name,dest/'models'/name)
     for name in ['README.md','LICENSE','THIRD_PARTY.md']:
         if (ROOT/name).exists():shutil.copy2(ROOT/name,dest/name)
     (dest/'LocalMeeting.exe').replace(dest/'KhansMinutes.exe')
