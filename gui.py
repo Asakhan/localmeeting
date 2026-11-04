@@ -50,7 +50,7 @@ class Window(QMainWindow):
         super().__init__();self.setWindowTitle(f'{APP_NAME} · {APP_ENGLISH}');self.resize(1180,800);self.setMinimumSize(960,660)
         self.config=settings();self.active=None;self.capture=None;self.worker=None;self.stage=None
         self.stop_thread=None;self.stop_error=None;self.selected=None;self.names_loading=False;self.last_live=None
-        self.jobs=[];self.started_monotonic=0.;self.last_status='';self.read_mtime=None
+        self.jobs=[];self.started_monotonic=0.;self.last_status='';self.read_mtime=None;self.worker_restarts=0
         root=QWidget();self.setCentralWidget(root);layout=QHBoxLayout(root);layout.setContentsMargins(0,0,0,0);layout.setSpacing(0)
         sidebar=QFrame();sidebar.setObjectName('sidebar');sidebar.setFixedWidth(206);nav=QVBoxLayout(sidebar);nav.setContentsMargins(18,32,18,20)
         brand=label("KHAN'S\nMINUTES");brand.setStyleSheet('font-size:25px;font-weight:bold;letter-spacing:2px;');nav.addWidget(brand)
@@ -181,6 +181,7 @@ class Window(QMainWindow):
             self.active=new_meeting(dict(self.config));self.capture=Capture(self.active,self.config)
             self.capture.start();self.started_monotonic=self.capture.started
             self.start_button.setEnabled(False);self.stop_button.setEnabled(True);self.last_live=None;self.live.clear()
+            self.worker_restarts=0
             self.launch_worker('transcribe');self.record_status.setText('녹음 중 · 음성 모델 준비 중');self.stop_thread=None
             import ctypes
             ctypes.windll.kernel32.SetThreadExecutionState(0x80000003)
@@ -228,6 +229,15 @@ class Window(QMainWindow):
                 for job in self.jobs:job.close()
                 self.jobs=[]
                 if code!=0:
+                    if self.capture and stage=='transcribe' and self.worker_restarts<3:
+                        # Completed chunks are checkpointed in results/, so a new worker resumes
+                        # where the failed one stopped instead of leaving the rest untranscribed.
+                        self.worker_restarts+=1
+                        try:
+                            self.launch_worker('transcribe')
+                            self.statusBar().showMessage(f"음성 분석을 다시 시작했습니다 ({self.worker_restarts}/3): {status.get('message','')}")
+                            return
+                        except Exception as e:status={'message':str(e)}
                     if self.capture:
                         self.record_status.setText('분석 중단 · 녹음은 계속됩니다. 종료 후 다시 처리할 수 있습니다.')
                         # Show once; recording persists independently.
@@ -324,6 +334,7 @@ class Window(QMainWindow):
             self.active=folder;self.last_live=None;self.start_button.setEnabled(False)
             audio=any((folder/'audio').glob('*.wav'))
             if not audio and not transcript(folder):raise RuntimeError('재처리할 음성이나 전사가 없습니다.')
+            self.worker_restarts=0
             self.launch_worker('transcribe' if audio else 'summarize');self.navigate(0)
         except Exception as e:self.active=None;self.start_button.setEnabled(True);self.error(str(e))
 

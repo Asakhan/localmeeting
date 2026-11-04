@@ -1,7 +1,7 @@
 """Local Minutes: durable storage, canonical speaker IDs, Word export."""
 from pathlib import Path
 from datetime import datetime
-import json, os, re, sys, uuid
+import json, os, re, sys, time, uuid
 
 ROOT = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
 APP_NAME='아사검의 회의록'
@@ -23,14 +23,39 @@ SECTIONS = [('agenda', '안건 (Agenda)'), ('discussion', '주요 논의사항')
 def now():
     return datetime.now().astimezone().isoformat(timespec='seconds')
 
-def atomic_json(path, data):
+def replace_file(src, dst, timeout=15.0):
+    """os.replace that survives transient Windows sharing violations.
+
+    On Windows, replacing a file fails with WinError 5/32 while any other process
+    holds it open (the GUI polls worker_status.json/transcript.jsonl every 500 ms;
+    antivirus and the search indexer also open new files briefly). Such locks last
+    milliseconds, so retry with a short backoff instead of failing the caller.
+    """
+    deadline = time.monotonic() + timeout
+    delay = 0.02
+    while True:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.5)
+
+def atomic_json(path, data, timeout=15.0):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
-    with tmp.open('w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.flush(); os.fsync(f.fileno())
-    os.replace(tmp, path)
+    try:
+        with tmp.open('w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush(); os.fsync(f.fileno())
+        replace_file(tmp, path, timeout)
+    finally:
+        try: tmp.unlink()
+        except FileNotFoundError: pass
+        except OSError: pass
 
 def read_json(path, default=None):
     try:
@@ -144,7 +169,7 @@ def export_docx(folder):
             for value in values: doc.add_paragraph(str(value),style='List Bullet')
     target=folder/'회의록.docx'
     temp=folder/'회의록.tmp.docx';doc.save(temp)
-    try:os.replace(temp,target)
+    try:replace_file(temp,target,timeout=2.0)
     except PermissionError:
         target=folder/f'회의록_수정_{datetime.now():%H%M%S}.docx';os.replace(temp,target)
     return target
@@ -166,7 +191,7 @@ def export_text(folder):
     temp=folder/'전체전사.tmp'
     with temp.open('w',encoding='utf-8-sig') as f:
         f.write('\n'.join(lines)+'\n');f.flush();os.fsync(f.fileno())
-    os.replace(temp,folder/'전체전사.txt')
+    replace_file(temp,folder/'전체전사.txt')
     return folder/'전체전사.txt'
 
 def export_minutes_text(folder):
@@ -188,7 +213,7 @@ def export_minutes_text(folder):
     target=folder/'회의록_요약.txt';temp=target.with_suffix('.tmp')
     with temp.open('w',encoding='utf-8-sig') as f:
         f.write('\n'.join(lines)+'\n');f.flush();os.fsync(f.fileno())
-    os.replace(temp,target)
+    replace_file(temp,target)
     return target
 
 

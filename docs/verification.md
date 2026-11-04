@@ -50,3 +50,10 @@ CPU 평균은 프로세스 CPU 시간 합계 / 경과 시간 / 32논리CPU로 �
 - 회의록 의미 검증: `verify_summary.py` 안의 명시적 합성 전사 (음성 생성 사용 안 함).
 
 원음, 실행 로그, 모델, 샘플 Word 파일은 Git 제외이며 개발 PC의 `test-output`에서만 확인한다.
+
+## 장애 기록: 2026-11-04 녹음 중 전사 중단 (WinError 5)
+
+- 증상: 10:05 시작 회의에서 24분 48초(10:30:45)에 `PermissionError: [WinError 5] 액세스가 거부되었습니다: worker_status.json.<uuid>.tmp -> worker_status.json`로 전사 워커가 종료됐다. 녹음은 11:24까지 계속돼 원음 393개 조각은 모두 남았고, 전사 결과는 124개 조각까지만 저장됐다.
+- 원인: GUI가 500 ms마다 `worker_status.json`·`transcript.jsonl`을 읽는다. Windows에서는 다른 프로세스가 대상 파일을 열고 있는 순간 `os.replace`가 실패한다(백신·검색 색인도 같은 현상을 일으킬 수 있음). 표시용 상태 쓰기 실패가 예외로 전파돼 전사 루프 전체가 멈췄다. 같은 PC에서 파일을 연 채 `os.replace`를 호출해 WinError 5가 재현됨을 확인했다.
+- 조치: `core.replace_file`이 공유 위반을 최대 15초 동안 짧은 간격으로 재시도한다. 모든 원자적 교체 경로(`atomic_json`, 전사·교정·화자 재분리의 `transcript.jsonl`, `전체전사.txt`, 회의록 TXT/Word)에 적용했다. 실패 시 임시 파일을 지운다. `engine.event` 상태 쓰기는 실패해도 무시하며 전사를 계속한다. 녹음 중 전사 워커가 비정상 종료되면 GUI가 `results/` 체크포인트부터 최대 3회 자동 재시작한다.
+- 회귀 테스트: `tests/test_file_lock.py` (읽기 핸들이 열린 상태에서 교체 대기, 시간 초과 시 임시 파일 정리, 상태 쓰기 실패 무시).

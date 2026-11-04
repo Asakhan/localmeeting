@@ -5,7 +5,7 @@ import re
 import time
 from difflib import SequenceMatcher
 from pathlib import Path
-from core import atomic_json, recognition_glossary
+from core import replace_file, atomic_json, recognition_glossary
 from transcript_correction import apply_edits
 
 
@@ -148,5 +148,5 @@ def correct_fast(folder, rows, glossary='', model_root=None):
         for row in corrected:
             stream.write(json.dumps(row, ensure_ascii=False)+'\n')
         stream.flush(); os.fsync(stream.fileno())
-    os.replace(temp, folder/'transcript.jsonl')
+    replace_file(temp, folder/'transcript.jsonl')
     return corrected
