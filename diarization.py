@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import json
 import os
 import time
-from core import atomic_json, read_json, transcript
+from core import replace_file, atomic_json, read_json, transcript
 
 
 def cluster_voices(vectors, count=0, threshold=.35):
@@ -155,5 +155,5 @@ def rediarize(folder, config, output=None):
     with temp.open('w',encoding='utf-8') as f:
         for row in result:f.write(json.dumps(row,ensure_ascii=False)+'\n')
         f.flush();os.fsync(f.fileno())
-    os.replace(temp,output/'transcript.jsonl')
+    replace_file(temp,output/'transcript.jsonl')
     return result

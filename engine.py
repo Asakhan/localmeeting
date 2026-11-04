@@ -1,7 +1,7 @@
 """Offline transcription worker. Only bounded 12-second chunks enter RAM."""
 from pathlib import Path
 import os, sys, time, subprocess, gc, json, traceback
-from core import atomic_json, read_json, append_jsonl, ROOT, recognition_glossary
+from core import replace_file, atomic_json, read_json, append_jsonl, ROOT, recognition_glossary
 from speech_quality import word_rejection, speaker_for_word
 
 ASR_REVISION='large-v3-int8-evidence-v2'
@@ -36,7 +36,9 @@ def gpu_free():
     except Exception:return 0
 
 def event(folder,kind,message,**kw):
-    atomic_json(Path(folder)/'worker_status.json',dict(kind=kind,message=message,updated=time.time(),**kw))
+    # Status is display-only: a locked status file must never stop transcription.
+    try:atomic_json(Path(folder)/'worker_status.json',dict(kind=kind,message=message,updated=time.time(),**kw),timeout=3.0)
+    except OSError:pass
 
 class SpeechEngine:
     def __init__(self,config,folder):
@@ -158,7 +160,7 @@ def rebuild_transcript(folder):
     with temp.open('w',encoding='utf-8') as f:
         for row in results:f.write(json.dumps(row,ensure_ascii=False)+'\n')
         f.flush();os.fsync(f.fileno())
-    os.replace(temp,folder/'transcript.jsonl')
+    replace_file(temp,folder/'transcript.jsonl')
     return results
 
 def run_transcription(folder):
