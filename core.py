@@ -94,6 +94,16 @@ def transcript(folder):
             except ValueError: pass # trailing interrupted write, original audio preserved
     return sorted(rows, key=lambda r: (r['start'], r.get('source','')))
 
+def estimated_speakers(rows, min_seconds=20.0, min_share=.03):
+    """Speakers who actually held the floor. A live label that owns only a
+    couple of seconds is clustering noise, not another participant."""
+    totals = {}
+    for r in rows:
+        if str(r.get('speaker', '')).startswith('참석자'):
+            totals[r['speaker']] = totals.get(r['speaker'], 0.) + max(0., r['end'] - r['start'])
+    floor = max(min_seconds, sum(totals.values()) * min_share)
+    return sum(v >= floor for v in totals.values())
+
 def append_jsonl(path, data):
     with Path(path).open('a', encoding='utf-8') as f:
         f.write(json.dumps(data, ensure_ascii=False) + '\n'); f.flush(); os.fsync(f.fileno())
