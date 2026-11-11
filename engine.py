@@ -74,15 +74,22 @@ class SpeechEngine:
     def speaker(self,vec,source,excluded=()):
         if vec is None:return '화자 미확인'
         np=self.np
-        scores=[float(np.dot(vec,x['vec'])) if x['source']==source and f'참석자{i+1}' not in excluded else -1. for i,x in enumerate(self.centroids)]
         threshold=max(.1,self.config.get('speaker_threshold',0.65)-.3)
-        if scores and max(scores)>=threshold:
-            i=int(np.argmax(scores));old=self.centroids[i]
+        # A known head count caps live identities: once every participant has a
+        # voice centroid, a low-similarity turn goes to the nearest one instead of
+        # inventing participant 9, 10, ... (2026-11-11: 3 people became 8+ live).
+        count=int(self.config.get('speaker_count',0) or 0)
+        same=[i for i,x in enumerate(self.centroids) if x['source']==source]
+        candidates=[i for i in same if f'참석자{i+1}' not in excluded]
+        scores={i:float(np.dot(vec,self.centroids[i]['vec'])) for i in candidates}
+        full=bool(count) and len(same)>=count
+        if scores and (max(scores.values())>=threshold or full):
+            i=max(scores,key=scores.get);old=self.centroids[i]
             # Slow update prevents short/noisy turns from moving identity abruptly.
             v=np.asarray(old['vec'])*0.9+vec*0.1
             old['vec']=(v/(np.linalg.norm(v)+1e-8)).tolist()
             return f'참석자{i+1}'
-        if len(self.centroids)>=64:return '화자 미확인'
+        if full or len(self.centroids)>=64:return '화자 미확인'
         self.centroids.append(dict(source=source,vec=vec.tolist()))
         return f'참석자{len(self.centroids)}'
 

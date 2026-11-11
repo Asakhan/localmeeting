@@ -1,6 +1,6 @@
 """Owned localhost-only llama.cpp server, bounded map/reduce summarization."""
 from pathlib import Path
-import json, os, subprocess, time, socket, secrets, urllib.request, traceback
+import json, os, re, subprocess, time, socket, secrets, urllib.request, traceback
 from core import ROOT, atomic_json, read_json, transcript, stamp, validate_minutes, empty_minutes, finalize_outputs
 from engine import runtime_setup, gpu_free, event
 from minutes_policy import POLICY, apply_policy
@@ -17,6 +17,36 @@ JSON 객체만 출력하세요. 정확한 키와 형식:
 follow_up은 반드시 문자열 배열입니다. 근거 객체는 별도 최상위 schedule_evidence 배열에 넣으세요.
 내용이 없는 항목은 []로 표시하세요. 실행 과제와 schedule_evidence를 제외한 목록 원소는 문자열입니다.'''
 SYSTEM += POLICY
+
+class LengthLimitError(RuntimeError):
+    """The model hit max_tokens; the batch can be retried in smaller pieces."""
+
+# STT hallucination loops ("안전과 안전과 안전과 ...") make the LLM echo/loop too.
+_REPEAT_WORDS=re.compile(r'(?<!\S)(\S+(?:\s+\S+){0,3}?)(?:\s+\1){2,}(?!\S)')
+_REPEAT_CHARS=re.compile(r'([^\s\d]{2,12}?)\1{3,}')
+
+def collapse_repeats(text):
+    """Collapse a 1-4 word phrase repeated 3+ times in a row to a single copy (LLM input only)."""
+    text=_REPEAT_WORDS.sub(lambda m:m.group(1)+' [반복]',text)
+    return _REPEAT_CHARS.sub(lambda m:m.group(1)+' [반복]',text)
+
+def split_lines(batch):
+    """Split a batch into two halves on line boundaries (falls back to character halves)."""
+    lines=batch.splitlines(keepends=True)
+    if len(lines)<2:
+        half=len(batch)//2;return batch[:half],batch[half:]
+    mid=len(lines)//2
+    return ''.join(lines[:mid]),''.join(lines[mid:])
+
+def summarize_batch(llm,context,batch,limit=10500,depth=0):
+    """Summarize one batch, halving it when the prompt is too large or the reply hits max_tokens."""
+    if llm.tokens(SYSTEM+context+batch)>limit:
+        if depth>=6 or len(batch)<200:raise RuntimeError('요약 입력 길이가 안전한 문맥 크기를 초과했습니다.')
+        return [r for part in split_lines(batch) for r in summarize_batch(llm,context,part,limit,depth+1)]
+    try:return [llm.summarize(context+batch)]
+    except LengthLimitError:
+        if depth>=4 or len(batch)<1500:raise
+        return [r for part in split_lines(batch) for r in summarize_batch(llm,context,part,limit,depth+1)]
 
 class LocalLLM:
     def __init__(self,folder,config):
@@ -74,7 +104,7 @@ class LocalLLM:
                 temperature=0.1,max_tokens=4000,response_format={'type':'json_object'},
                 chat_template_kwargs={'enable_thinking':False}),timeout=900)
             choice=result['choices'][0]
-            if choice.get('finish_reason')=='length':raise RuntimeError('회의록 응답이 길이 제한에 도달했습니다. 원음과 전사를 보존했습니다.')
+            if choice.get('finish_reason')=='length':raise LengthLimitError('회의록 응답이 길이 제한에 도달했습니다. 원음과 전사를 보존했습니다.')
             try:return validate_minutes(json.loads(choice['message']['content']))
             except (ValueError,KeyError) as error:
                 if attempt:raise
@@ -186,18 +216,15 @@ def run_summary(folder):
         export_text(folder)
         event(folder,'summarizing','로컬 회의록 모델 준비 중')
         with LocalLLM(folder,config) as llm:
-            texts=[f"[R{i}] [{stamp(r['start'])}] {r['speaker']}: {r['text']}" for i,r in enumerate(rows)]
+            texts=[f"[R{i}] [{stamp(r['start'])}] {r['speaker']}: {collapse_repeats(r['text'])}" for i,r in enumerate(rows)]
             batches=pack_texts(texts)
             level=0
             while True:
                 results=[]
                 for i,batch in enumerate(batches):
                     event(folder,'summarizing',f'회의록 정리 중 · {i+1}/{len(batches)}'+(' · 통합' if level else ''))
-                    # The tokenizer is authoritative; split again if unusual text exceeds budget.
-                    if llm.tokens(SYSTEM+context+batch)>10500:
-                        half=len(batch)//2
-                        results.extend([llm.summarize(context+batch[:half]),llm.summarize(context+batch[half:])])
-                    else:results.append(llm.summarize(context+batch))
+                    # The tokenizer is authoritative; halve on oversize input or a max_tokens reply.
+                    results.extend(summarize_batch(llm,context,batch))
                 atomic_json(folder/f'summary_pass_{level}.json',results)
                 if len(results)==1:result=results[0];break
                 batches=pack_texts([json.dumps(r,ensure_ascii=False) for r in results])

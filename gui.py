@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QHBoxLayout,QVBo
     QComboBox,QCheckBox,QSpinBox,QDoubleSpinBox,QFormLayout,QFileDialog,QMessageBox,
     QTableWidget,QTableWidgetItem,QHeaderView,QProgressBar,QSplitter,QScrollArea)
 from core import (ROOT, DATA, APP_NAME, APP_ENGLISH, settings, atomic_json, read_json, new_meeting, now, stamp,
-                  transcript, display, SECTIONS, export_docx, export_text, export_minutes_text)
+                  transcript, estimated_speakers, display, SECTIONS, export_docx, export_text, export_minutes_text)
 
 STYLE='''
 QMainWindow,QWidget {background:#F5F7F9;color:#182C37;font-family:"Malgun Gothic";font-size:13px;}
@@ -44,6 +44,13 @@ def button(text,slot,name=None):
     x=QPushButton(text);x.clicked.connect(slot)
     if name:x.setObjectName(name)
     return x
+
+def keep_awake(on):
+    # ES_CONTINUOUS|ES_SYSTEM_REQUIRED|ES_DISPLAY_REQUIRED. On Modern Standby laptops
+    # the display timeout alone suspends every process, so post-recording analysis
+    # must hold the same request as recording (2026-11-11: 2 h stall after stop).
+    import ctypes
+    ctypes.windll.kernel32.SetThreadExecutionState(0x80000003 if on else 0x80000000)
 
 class Window(QMainWindow):
     def __init__(self):
@@ -170,7 +177,7 @@ class Window(QMainWindow):
             job=Job();job.assign(self.worker);self.jobs.append(job)
         except Exception:
             self.worker.terminate();self.worker.wait();self.worker=None;self.worker_log.close();raise
-        self.stage=stage
+        self.stage=stage;keep_awake(True)
 
     def start_recording(self):
         if self.active:return
@@ -183,8 +190,6 @@ class Window(QMainWindow):
             self.start_button.setEnabled(False);self.stop_button.setEnabled(True);self.last_live=None;self.live.clear()
             self.worker_restarts=0
             self.launch_worker('transcribe');self.record_status.setText('녹음 중 · 음성 모델 준비 중');self.stop_thread=None
-            import ctypes
-            ctypes.windll.kernel32.SetThreadExecutionState(0x80000003)
         except Exception as e:
             if self.capture:
                 try:self.capture.stop()
@@ -209,8 +214,6 @@ class Window(QMainWindow):
                 self.statusBar().showMessage('녹음 오류: '+'; '.join(self.capture.errors));self.stop_recording()
             if self.stop_thread and not self.stop_thread.is_alive():
                 self.capture=None;self.stop_thread=None;self.level.setValue(0)
-                import ctypes
-                ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
                 if self.stop_error:
                     self.error(self.stop_error);self.finish_active(False);return
                 if self.worker is None:self.finish_active(False);return
@@ -223,7 +226,8 @@ class Window(QMainWindow):
                 mt=path.stat().st_mtime_ns
                 if mt!=self.last_live:
                     self.last_live=mt;rows=transcript(self.active);self.render_transcript(rows[-200:])
-                    self.speaker_count.setText(f"감지된 화자 {len({r['speaker'] for r in rows if r['speaker'].startswith('참석자')})}명 (추정)")
+                    final=status.get('kind') in ('transcribed','correcting','summarizing','complete')
+                    self.speaker_count.setText(f"감지된 화자 {estimated_speakers(rows)}명 "+('(전체 재검토)' if final else '(실시간 추정 · 종료 후 재검토)'))
             if self.worker and self.worker.poll() is not None:
                 code=self.worker.returncode;stage=self.stage;self.worker=None;self.worker_log.close()
                 for job in self.jobs:job.close()
@@ -252,6 +256,7 @@ class Window(QMainWindow):
         if self.worker and self.worker.poll() is None:
             for job in self.jobs:job.close()
             self.jobs=[];self.worker.wait(timeout=10);self.worker=None;self.worker_log.close()
+        keep_awake(False)
         if self.active:
             meta=read_json(self.active/'meeting.json',{})
             if not success:
@@ -352,10 +357,24 @@ class Window(QMainWindow):
             except Exception as e:self.error(str(e))
     def error(self,text):QMessageBox.warning(self,'확인 필요',text)
     def closeEvent(self,event):
-        if self.active:
-            QMessageBox.information(self,'회의 진행 중','회의 종료 후 저장이 완료될 때 창을 닫아주세요. 창을 최소화하고 다른 작업을 할 수 있습니다.')
+        if self.capture:
+            QMessageBox.information(self,'회의 진행 중','먼저 회의 종료를 눌러 녹음을 마쳐 주세요. 창을 최소화하고 다른 작업을 할 수 있습니다.')
             event.ignore();return
+        if self.active:
+            # Post-recording analysis can take long; never trap the user. Stopping
+            # keeps the original audio, and 회의록 보기 → 다시 처리 resumes from checkpoints.
+            answer=QMessageBox.question(self,'회의록 정리 중',
+                f"{self.record_status.text()}
+
+지금 닫으면 정리 작업을 중단합니다. 원음과 전사는 보존되며 "
+                "나중에 '회의록 보기 → 다시 처리'로 이어서 진행할 수 있습니다.
+
+작업을 중단하고 닫을까요?",
+                QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+            if answer!=QMessageBox.Yes:event.ignore();return
+            self.finish_active(False)
         for job in self.jobs:job.close()
+        keep_awake(False)
         event.accept()
 
 def run_gui():
